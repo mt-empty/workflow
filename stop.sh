@@ -1,4 +1,4 @@
 #! /bin/bash
 
-docker container stop workflow-redis
-# docker container rm workflow-redis
+docker container stop workflow-redis workflow-postgres
+docker container rm workflow-redis workflow-postgres

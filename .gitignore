@@ -59,3 +59,4 @@ Cargo.lock
 other/
 .vscode/launch.json
 shortcut-rust-client.code-workspace
+.env
