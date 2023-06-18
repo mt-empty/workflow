@@ -1,0 +1,11 @@
+name: check file exists
+description: check if file exists
+events: 
+  fileExists:
+    path: ./tests/tasks/create_foo.sh.sh
+    success: 
+      action:
+        path: ./tests/tasks/free.sh
+      failure:
+        - echo "file does not exist"
+

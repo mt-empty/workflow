@@ -14,6 +14,9 @@ use std::time::Duration;
 use std::{env, fmt, num};
 use std::{str, thread};
 
+#[cfg(test)]
+mod tests;
+
 struct Event {
     uid: u32,
     name: String,
@@ -223,3 +226,5 @@ fn task_executor(task: Task) {
 //         std::thread::sleep(std::time::Duration::from_secs(1));
 //     }
 // }
+
+
