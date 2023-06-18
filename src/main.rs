@@ -2,16 +2,17 @@ use bincode::{deserialize, serialize};
 use ctrlc;
 use dotenv::dotenv;
 use postgres::{Client, Error, NoTls};
+use rayon::ThreadPoolBuilder;
 use redis::{Commands, Connection, FromRedisValue, RedisResult, ToRedisArgs};
 use serde::{Deserialize, Serialize};
-use std::env;
+use std::fmt::Formatter;
 use std::num::NonZeroUsize;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use std::{env, fmt, num};
 use std::{str, thread};
-use rayon::prelude::*;
 
 struct Event {
     uid: u32,
@@ -30,6 +31,18 @@ struct Task {
     date: String,
     time: String,
     file: String,
+}
+
+impl fmt::Display for Task {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        writeln!(f, "\tuid: {}", self.uid)?;
+        writeln!(f, "\tname: {}", self.name)?;
+        writeln!(f, "\tdescription: {}", self.description)?;
+        writeln!(f, "\tdate: {}", self.date)?;
+        writeln!(f, "\ttime: {}", self.time)?;
+        writeln!(f, "\tfile: {}", self.file)?;
+        Ok(())
+    }
 }
 
 impl Event {
@@ -54,6 +67,8 @@ fn main() -> RedisResult<()> {
     })
     .expect("Error setting Ctrl-C handler");
 
+    let thread_pool = ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+
     let redis_result = get_redis_con();
     let postgres_result = postgres();
 
@@ -61,10 +76,10 @@ fn main() -> RedisResult<()> {
 
     let full_task = Task {
         uid: 1,
-        name: "test".to_string(),
-        description: "test".to_string(),
-        date: "test".to_string(),
-        time: "test".to_string(),
+        name: "name".to_string(),
+        description: "description".to_string(),
+        date: "date".to_string(),
+        time: "time".to_string(),
         file: "./testcases/create_foo.sh".to_string(),
     };
 
@@ -77,10 +92,11 @@ fn main() -> RedisResult<()> {
         match task {
             Some(value) => {
                 let popped_value: String = FromRedisValue::from_redis_value(&value)?;
-                println!("Task: {}", popped_value);
-                // asynchronously execute task using task_executor, this should create a new thread
-                let thread_handle = thread::spawn(move || {
+                // If the program exists, then thread_pool will be dropped and all threads will be stopped
+                // which means that threads will not be able to complete their current task
+                thread_pool.spawn(move || {
                     let task: Task = deserialize(&popped_value.as_bytes()).unwrap();
+                    println!("Task: {}", task);
                     task_executor(task);
                 });
             }
@@ -91,10 +107,7 @@ fn main() -> RedisResult<()> {
         thread::sleep(Duration::from_millis(500));
     }
 
-    println!("Ctrl+C signal detected. Exiting...");
-    thread_handle
-        .join()
-        .expect("Failed to join the new thread.");
+    println!("\nCtrl+C signal detected. Exiting...");
 
     Ok(())
 
@@ -171,6 +184,7 @@ fn get_redis_con() -> RedisResult<redis::Connection> {
 
 fn task_executor(task: Task) {
     println!("Task Executor");
+    thread::sleep(Duration::from_millis(5000));
     let output = Command::new("sh")
         .arg(task.file)
         .output()
