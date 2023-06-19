@@ -7,6 +7,6 @@ fn test_if_redis_is_up() {
 
 #[test]
 fn test_if_postgres_is_up() {
-    assert!(crate::postgres().is_ok());
+    assert!(crate::get_postgres_client().is_ok());
 }
 
