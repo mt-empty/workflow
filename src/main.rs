@@ -1,19 +1,19 @@
 use bincode::{deserialize, serialize};
-use ctrlc;
+use chrono::prelude::*;
+use ctrlc::set_handler;
 use dotenv::dotenv;
 use postgres::{Client, Error, NoTls};
 use rayon::ThreadPoolBuilder;
-use redis::{Commands, Connection, FromRedisValue, RedisResult, ToRedisArgs};
+use redis::{Commands, FromRedisValue, RedisResult};
 use serde::{Deserialize, Serialize};
-use std::fmt::{Formatter, Display};
+use std::fmt::{Display, Formatter};
 use std::num::NonZeroUsize;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{env, fmt, num};
+use std::time::Duration;
+use std::{env, fmt};
 use std::{str, thread};
-use chrono::prelude::*;
 
 #[cfg(test)]
 mod tests;
@@ -24,7 +24,7 @@ struct Event {
     description: String,
     date: String,
     time: String,
-    file: String,
+    content: String,
 }
 
 enum TaskStatus {
@@ -84,7 +84,7 @@ fn main() -> RedisResult<()> {
 
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
-    ctrlc::set_handler(move || {
+    set_handler(move || {
         r.store(false, Ordering::SeqCst);
     })
     .expect("Error setting Ctrl-C handler");
@@ -184,11 +184,17 @@ fn task_executor(task: Task) {
     let postgres_result = get_postgres_client();
     let mut postgres_client = postgres_result.unwrap();
 
-
-    let task_uid = postgres_client.execute(
-        "INSERT INTO tasks (name, description, file, status) VALUES ($1, $2, $3, $4)",
-        &[&task.name, &task.description, &task.file, &TaskStatus::Running.to_string()],
-    ).unwrap();
+    let task_uid = postgres_client
+        .execute(
+            "INSERT INTO tasks (name, description, file, status) VALUES ($1, $2, $3, $4)",
+            &[
+                &task.name,
+                &task.description,
+                &task.file,
+                &TaskStatus::Running.to_string(),
+            ],
+        )
+        .unwrap();
 
     // thread::sleep(Duration::from_millis(5000));
     let output = Command::new("sh")
