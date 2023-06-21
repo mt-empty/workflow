@@ -1,3 +1,4 @@
+use anyhow::Error as AnyError;
 use bincode::{deserialize, serialize};
 use chrono::prelude::*;
 use ctrlc::set_handler;
@@ -79,24 +80,41 @@ struct EventStore {
     tasks: Vec<Task>,
 }
 
-fn main() -> RedisResult<()> {
+fn main() -> Result<(), AnyError> {
     println!("Hello, world!");
 
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
+
     set_handler(move || {
         r.store(false, Ordering::SeqCst);
     })
     .expect("Error setting Ctrl-C handler");
 
-    let thread_pool = ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+    let thread_pool_result = ThreadPoolBuilder::new().num_threads(4).build();
+    if let Err(e) = thread_pool_result {
+        println!("Failed to create thread pool {}", e);
+        println!("exiting...");
+        std::process::exit(1);
+    }
+    let thread_pool = thread_pool_result.unwrap();
 
-    let postgres_result = create_initial_tables();
+    if let Err(e) = create_initial_tables() {
+        println!("Failed to create initial tables {}", e);
+        println!("exiting...");
+        std::process::exit(1);
+    }
+    println!("Created initial postgres tables");
+
     let redis_result = get_redis_con();
-
+    if let Err(e) = redis_result {
+        println!("Failed to connect to redis {}", e);
+        println!("exiting...");
+        std::process::exit(1);
+    }
     let mut redis_con = redis_result.unwrap();
 
-    let full_task = Task {
+    let mock_task = Task {
         uid: 1,
         name: "name".to_string(),
         description: "description".to_string(),
@@ -105,7 +123,8 @@ fn main() -> RedisResult<()> {
         file: "./tests/tasks/create_foo.sh".to_string(),
     };
 
-    let serialized_task = serialize(&full_task).unwrap();
+    // serialization is needed to store the task in redis
+    let serialized_task = serialize(&mock_task).unwrap();
 
     redis_con.rpush("test", serialized_task)?;
 
@@ -119,11 +138,13 @@ fn main() -> RedisResult<()> {
                 thread_pool.spawn(move || {
                     let task: Task = deserialize(&popped_value.as_bytes()).unwrap();
                     println!("Task: {}", task);
-                    task_executor(task);
+                    if let Err(e) = task_executor(task) {
+                        println!("Failed to execute task {}", e);
+                    };
                 });
             }
             None => {
-                println!("No task ");
+                println!("No task");
             }
         }
         thread::sleep(Duration::from_millis(500));
@@ -134,9 +155,8 @@ fn main() -> RedisResult<()> {
 }
 
 fn create_initial_tables() -> Result<(), Error> {
-    let postgres_result = get_postgres_client();
+    let mut postgres_client = get_postgres_client()?;
 
-    let mut postgres_client = postgres_result.unwrap();
     //using postgres, create a table to store the state of workflow engine tasks
     postgres_client.batch_execute(
         "
@@ -158,7 +178,7 @@ fn create_initial_tables() -> Result<(), Error> {
 fn get_postgres_client() -> Result<Client, Error> {
     dotenv().ok();
     let postgres_password = env::var("POSTGRES_PASSWORD").expect("POSTGRES_PASSWORD not set");
-    let mut client = Client::connect(
+    let client = Client::connect(
         format!(
             "host=localhost user=postgres password={}",
             postgres_password
@@ -166,35 +186,32 @@ fn get_postgres_client() -> Result<Client, Error> {
         .as_str(),
         NoTls,
     )?;
-    println!("Connected to postgres");
 
     Ok(client)
 }
 
 fn get_redis_con() -> RedisResult<redis::Connection> {
-    // connect to redis
-    let client = redis::Client::open("redis://172.17.0.2/")?;
+    dotenv().ok();
+    let client = redis::Client::open(env::var("REDIS_URL").expect("Redis url not set"))?;
     let con = client.get_connection()?;
     Ok(con)
 }
 
-fn task_executor(task: Task) {
+fn task_executor(task: Task) -> Result<(), AnyError> {
     println!("Task Executor");
 
     let postgres_result = get_postgres_client();
-    let mut postgres_client = postgres_result.unwrap();
+    let mut postgres_client = postgres_result?;
 
-    let task_uid = postgres_client
-        .execute(
-            "INSERT INTO tasks (name, description, file, status) VALUES ($1, $2, $3, $4)",
-            &[
-                &task.name,
-                &task.description,
-                &task.file,
-                &TaskStatus::Running.to_string(),
-            ],
-        )
-        .unwrap();
+    let task_uid = postgres_client.execute(
+        "INSERT INTO tasks (name, description, file, status) VALUES ($1, $2, $3, $4)",
+        &[
+            &task.name,
+            &task.description,
+            &task.file,
+            &TaskStatus::Running.to_string(),
+        ],
+    )?;
 
     // thread::sleep(Duration::from_millis(5000));
     let output = Command::new("sh")
@@ -202,16 +219,13 @@ fn task_executor(task: Task) {
         .output()
         .expect("failed to execute process");
 
-    // let local = Local::now().to_string();
-
-    postgres_client
-        .execute(
-            "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
-            &[&TaskStatus::Completed.to_string(), &(task_uid as i32)],
-        )
-        .unwrap();
+    postgres_client.execute(
+        "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
+        &[&TaskStatus::Completed.to_string(), &(task_uid as i32)],
+    )?;
 
     println!("status: {}", output.status);
-    println!("stdout: {}", str::from_utf8(&output.stdout).unwrap());
-    println!("stderr: {}", str::from_utf8(&output.stderr).unwrap());
+    println!("stdout: {}", str::from_utf8(&output.stdout)?);
+    println!("stderr: {}", str::from_utf8(&output.stderr)?);
+    Ok(())
 }
