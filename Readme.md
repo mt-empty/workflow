@@ -4,10 +4,11 @@ Readability oriented workflow engine
 
 ## Setup
 
-Postgres password
+`.env` file
 
 ```bash
 echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> .env
+echo "REDIS_URL=redis://localhost" >> .env
 ```
 
 Clippy 
@@ -20,10 +21,10 @@ cargo clippy --fix -- -W clippy::pedantic -W clippy::nursery -W clippy::unwrap_u
 ## TODO
 - [o] test suite
 - [ ] Add a cli tool to 
-  - [ ] parse workflow files
-  - [ ] queue workflow after parsing
+  - [ ] parse workflow yaml files
+  - [ ] add tasks to workflow queue 
 - [ ] Add a cli tool to 
   - [ ] check the status of workflows
-  - [ ] Control workflows
-- [ ] Event driven
+  - [ ] Control workflows, stop, continue, delete
+- [ ] Add support for event triggers
 - [ ] Make it distributed
