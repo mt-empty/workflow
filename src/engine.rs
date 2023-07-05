@@ -11,8 +11,7 @@ use std::process::Command as ShellCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use std::{env, fmt};
-use std::{str, thread};
+use std::{env, fmt, str, thread};
 
 use std::fs::File;
 
@@ -91,7 +90,7 @@ struct EventStore {
     tasks: Vec<Task>,
 }
 
-pub fn start_handler() -> Result<(), AnyError> {
+pub fn handle_start() -> Result<(), AnyError> {
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
@@ -103,7 +102,7 @@ pub fn start_handler() -> Result<(), AnyError> {
     // spawn a new process to run the engine
     let engine_running = running.clone();
 
-    if let Err(e) = start_engine(engine_running) {
+    if let Err(e) = workflow_engine(engine_running) {
         eprintln!("Failed to start engine, {}", e);
         eprintln!("exiting...");
         std::process::exit(1);
@@ -113,8 +112,8 @@ pub fn start_handler() -> Result<(), AnyError> {
     Ok(())
 }
 
-pub fn stop_handler() -> Result<(), AnyError> {
-    let mut postgres_client = get_postgres_client()?;
+pub fn handle_stop() -> Result<(), AnyError> {
+    let mut postgres_client = create_postgres_client()?;
     postgres_client.execute(
         "
     UPDATE engine_status SET stop_signal = true WHERE ID = 1;
@@ -124,7 +123,7 @@ pub fn stop_handler() -> Result<(), AnyError> {
     Ok(())
 }
 
-fn start_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
+fn workflow_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
     // // Open the file in write-only mode
     // let file = File::create("output.txt").expect("Failed to create file");
 
@@ -141,13 +140,13 @@ fn start_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
         std::process::exit(1);
     }
     let thread_pool = thread_pool_result.unwrap();
-    if let Err(e) = create_initial_tables() {
+    if let Err(e) = initialize_tables() {
         eprintln!("Failed to create initial tables {}", e);
         eprintln!("exiting...");
         std::process::exit(1);
     }
     println!("Created initial postgres tables");
-    let redis_result = get_redis_con();
+    let redis_result = create_redis_connection();
     if let Err(e) = redis_result {
         eprintln!("Failed to connect to redis {}", e);
         eprintln!("exiting...");
@@ -162,7 +161,7 @@ fn start_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
         time: "time".to_string(),
         file: "./tests/tasks/create_foo.sh".to_string(),
     };
-    let mut postgres_client = get_postgres_client()?;
+    let mut postgres_client = create_postgres_client()?;
     postgres_client.execute("
     INSERT INTO engine_status (status, started_at) VALUES ($1, NOW()) ON CONFLICT (id) DO UPDATE SET status = $1, started_at = NOW() WHERE engine_status.id = 1;
     ", &[&EngineStatus::Running.to_string()])?;
@@ -179,7 +178,7 @@ fn start_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
                 thread_pool.spawn(move || {
                     let task: Task = deserialize(&popped_value.as_bytes()).unwrap();
                     println!("Task: {}", task);
-                    if let Err(e) = task_executor(task) {
+                    if let Err(e) = execute_task(task) {
                         eprintln!("Failed to execute task {}", e);
                     };
                 });
@@ -220,8 +219,8 @@ fn start_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
     Ok(())
 }
 
-fn create_initial_tables() -> Result<(), Error> {
-    let mut postgres_client = get_postgres_client()?;
+fn initialize_tables() -> Result<(), Error> {
+    let mut postgres_client = create_postgres_client()?;
 
     //using postgres, create a table to store the state of workflow engine tasks
     // TODO: remove constraint on engine_status table after implementing multiple engine instances
@@ -254,7 +253,7 @@ fn create_initial_tables() -> Result<(), Error> {
     )
 }
 
-fn get_postgres_client() -> Result<Client, Error> {
+fn create_postgres_client() -> Result<Client, Error> {
     dotenv().ok();
     let postgres_password = env::var("POSTGRES_PASSWORD").expect("POSTGRES_PASSWORD not set");
     let client = Client::connect(
@@ -269,17 +268,17 @@ fn get_postgres_client() -> Result<Client, Error> {
     Ok(client)
 }
 
-fn get_redis_con() -> RedisResult<redis::Connection> {
+fn create_redis_connection() -> RedisResult<redis::Connection> {
     dotenv().ok();
     let client = redis::Client::open(env::var("REDIS_URL").expect("Redis url not set"))?;
     let con = client.get_connection()?;
     Ok(con)
 }
 
-fn task_executor(task: Task) -> Result<(), AnyError> {
+fn execute_task(task: Task) -> Result<(), AnyError> {
     println!("Task Executor");
 
-    let postgres_result = get_postgres_client();
+    let postgres_result = create_postgres_client();
     let mut postgres_client = postgres_result?;
 
     let task_uid = postgres_client.execute(
