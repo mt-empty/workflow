@@ -3,10 +3,14 @@ use clap::{Parser, Subcommand};
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
 use serde_yaml::from_str;
+use std::process::Command;
 use std::{
     fs::{read_to_string, File},
     io::Read,
 };
+
+use workflow::engine::start_handler;
+use workflow::engine::stop_handler;
 
 use std::collections::BTreeMap;
 // use std::io::{BufRead, BufReader, Cursor, Read};
@@ -27,6 +31,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    // Starts the engine
+    Start {},
+    // Stops the engine
+    Engine {},
+    Stop {},
     /// Adds workflow to the queue
     Add {
         file_path: String,
@@ -35,8 +44,8 @@ enum Commands {
     Show {
         task_name: String,
     },
-    // Stops the task
-    Stop {
+    // Pauses the task
+    Pause {
         task_name: String,
     },
     // Continues the task
@@ -55,10 +64,44 @@ pub fn cli() {
     let cli = Cli::parse();
 
     match &cli.command {
+        Commands::Start {} => {
+            println!("Starting the engine");
+            let stdout_file =
+                File::create("engine_stdout.txt").expect("Failed to create stdout file");
+            // delete the content of the file
+            let _ = std::fs::write("engine_stdout.txt", "");
+            let stderr_file =
+                File::create("engine_stderr.txt").expect("Failed to create stderr file");
+            let _ = std::fs::write("engine_stderr.txt", "");
+            std::process::Command::new("cargo")
+                .arg("run")
+                // .arg("--bin")
+                .arg("engine")
+                .stderr(stderr_file)
+                .stdout(stdout_file)
+                .spawn()
+                .expect("Failed to start engine");
+            std::process::exit(0);
+        }
+        Commands::Engine {} => {
+            println!("Engine");
+            if let Err(e) = start_handler() {
+                println!("Failed to start the engine, {}", e);
+                std::process::exit(1);
+            };
+        }
+        Commands::Stop {} => {
+            println!("Stopping the engine");
+            if let Err(e) = stop_handler() {
+                println!("Failed to stop the engine, {}", e);
+                std::process::exit(1);
+            };
+            std::process::exit(0);
+        }
         Commands::Add { file_path } => {
             println!("Adding file: {}", file_path);
             if let Err(e) = add(file_path.to_string()) {
-                println!("Failed to add file {}", e);
+                println!("Failed to add file, {}", e);
                 std::process::exit(1);
             }
             // Add your logic for the 'add' Commands here
@@ -67,9 +110,9 @@ pub fn cli() {
             println!("Showing task: {}", task_name);
             // Add your logic for the 'show' Commands here
         }
-        Commands::Stop { task_name } => {
-            println!("Stopping task: {}", task_name);
-            // Add your logic for the 'stop' Commands here
+        Commands::Pause { task_name } => {
+            println!("Continuing task: {}", task_name);
+            // Add your logic for the 'continue' Commands here
         }
         Commands::Continue { task_name } => {
             println!("Continuing task: {}", task_name);

@@ -18,6 +18,20 @@ cargo clippy --fix -- -W clippy::pedantic -W clippy::nursery -W clippy::unwrap_u
 
 ```
 
+
+Postgres
+
+```bash
+docker exec -it workflow-postgres psql -U postgres -d postgres
+```
+
+```sql
+\dt
+
+SELECT * FROM engine_status;
+```
+
+
 ## TODO
 - [o] test suite
 - [ ] Add a cli tool to 
