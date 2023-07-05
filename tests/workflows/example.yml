@@ -1,11 +1,19 @@
-name: check file exists
-description: check if file exists
-events: 
-  fileExists:
-    path: ./tests/tasks/create_foo.sh.sh
-    success: 
-      action:
-        path: ./tests/tasks/free.sh
-      failure:
-        - echo "file does not exist"
+workflow:
+  - name: check file exists
+    description: check if file exists
+    events: 
+      - name: Event1
+        description: First event
+        trigger: ./path/to/event.sh
+        actions:
+          - task: 
+            name: foo
+            description: First task
+            path: ./tests/tasks/create_foo.sh.sh
+            on_failure:
+              message: "file does not exist"
+          - task: 
+            path: ./tests/tasks/create_foo2.sh.sh
+            on_failure: 
+              path: ./tests/tasks/free.sh
 
