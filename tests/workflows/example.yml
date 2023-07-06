@@ -1,19 +1,15 @@
-workflow:
-  - name: check file exists
-    description: check if file exists
-    events: 
-      - name: Event1
-        description: First event
-        trigger: ./path/to/event.sh
-        actions:
-          - task: 
-            name: foo
-            description: First task
-            path: ./tests/tasks/create_foo.sh.sh
-            on_failure:
-              message: "file does not exist"
-          - task: 
-            path: ./tests/tasks/create_foo2.sh.sh
-            on_failure: 
-              path: ./tests/tasks/free.sh
-
+name: check file exists
+description: check if file exists
+events:
+  - name: Event1
+    description: First event
+    trigger: ./path/to/event.sh
+    tasks:
+      - name: foo
+        description: First task
+        path: ./tests/tasks/create_foo.sh.sh
+        on_failure:
+          message: "file does not exist"
+      - path: ./tests/tasks/create_foo2.sh.sh
+        on_failure:
+          path: ./tests/tasks/free.sh
