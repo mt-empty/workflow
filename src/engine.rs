@@ -13,16 +13,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{env, fmt, str, thread};
 
+use crate::utils::{create_postgres_client, create_redis_connection};
 use std::fs::File;
-
-struct Event {
-    uid: u32,
-    name: String,
-    description: String,
-    date: String,
-    time: String,
-    content: String,
-}
 
 enum TaskStatus {
     Pending,
@@ -57,16 +49,16 @@ impl Display for EngineStatus {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Task {
-    uid: u32,
-    name: String,
-    description: String,
-    date: String,
-    time: String,
-    file: String,
+pub struct EngineTask {
+    pub uid: u32,
+    pub name: String,
+    pub description: String,
+    pub date: String,
+    pub time: String,
+    pub file: String,
 }
 
-impl fmt::Display for Task {
+impl fmt::Display for EngineTask {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         writeln!(f, "\tuid: {}", self.uid)?;
         writeln!(f, "\tname: {}", self.name)?;
@@ -78,16 +70,25 @@ impl fmt::Display for Task {
     }
 }
 
-impl Event {
-    fn execute(&self) {
-        println!("Event: {}", self.name);
-    }
+pub struct EngineEvent {
+    pub uid: u32,
+    pub name: String,
+    pub description: String,
+    pub date: String,
+    pub time: String,
+    pub trigger: String,
 }
 
-// replace with a database
-struct EventStore {
-    events: Vec<Event>,
-    tasks: Vec<Task>,
+impl fmt::Display for EngineEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        writeln!(f, "\tuid: {}", self.uid)?;
+        writeln!(f, "\tname: {}", self.name)?;
+        writeln!(f, "\tdescription: {}", self.description)?;
+        writeln!(f, "\tdate: {}", self.date)?;
+        writeln!(f, "\ttime: {}", self.time)?;
+        writeln!(f, "\ttrigger: {}", self.trigger)?;
+        Ok(())
+    }
 }
 
 pub fn handle_start() -> Result<(), AnyError> {
@@ -99,10 +100,7 @@ pub fn handle_start() -> Result<(), AnyError> {
     })
     .expect("Error setting Ctrl-C handler");
 
-    // spawn a new process to run the engine
-    let engine_running = running.clone();
-
-    if let Err(e) = workflow_engine(engine_running) {
+    if let Err(e) = workflow_engine(running) {
         eprintln!("Failed to start engine, {}", e);
         eprintln!("exiting...");
         std::process::exit(1);
@@ -153,7 +151,7 @@ fn workflow_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
         std::process::exit(1);
     }
     let mut redis_con = redis_result.unwrap();
-    let mock_task = Task {
+    let mock_task = EngineTask {
         uid: 1,
         name: "name".to_string(),
         description: "description".to_string(),
@@ -176,7 +174,7 @@ fn workflow_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
                 // If the program exists, then thread_pool will be dropped and all threads will be stopped
                 // which means that threads will not be able to complete their current task
                 thread_pool.spawn(move || {
-                    let task: Task = deserialize(&popped_value.as_bytes()).unwrap();
+                    let task: EngineTask = deserialize(popped_value.as_bytes()).unwrap();
                     println!("Task: {}", task);
                     if let Err(e) = execute_task(task) {
                         eprintln!("Failed to execute task {}", e);
@@ -253,29 +251,7 @@ fn initialize_tables() -> Result<(), Error> {
     )
 }
 
-fn create_postgres_client() -> Result<Client, Error> {
-    dotenv().ok();
-    let postgres_password = env::var("POSTGRES_PASSWORD").expect("POSTGRES_PASSWORD not set");
-    let client = Client::connect(
-        format!(
-            "host=localhost user=postgres password={}",
-            postgres_password
-        )
-        .as_str(),
-        NoTls,
-    )?;
-
-    Ok(client)
-}
-
-fn create_redis_connection() -> RedisResult<redis::Connection> {
-    dotenv().ok();
-    let client = redis::Client::open(env::var("REDIS_URL").expect("Redis url not set"))?;
-    let con = client.get_connection()?;
-    Ok(con)
-}
-
-fn execute_task(task: Task) -> Result<(), AnyError> {
+fn execute_task(task: EngineTask) -> Result<(), AnyError> {
     println!("Task Executor");
 
     let postgres_result = create_postgres_client();

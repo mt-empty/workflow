@@ -1,6 +1,12 @@
 # Workflow
 
-Readability oriented workflow engine  
+Readability oriented workflow engine.
+## Features
+
+- Event driven via  
+## Limitations
+
+When an event gets triggered depending on the resource it might take a while for the event to be processed.
 
 ## Setup
 
@@ -34,11 +40,11 @@ SELECT * FROM engine_status;
 
 ## TODO
 - [o] test suite
-- [ ] Add a cli tool to 
-  - [ ] parse workflow yaml files
+- [o] Add support for event triggers
+- [o] Add a cli tool to 
+  - [x] parse workflow yaml files
   - [ ] add tasks to workflow queue 
-- [ ] Add a cli tool to 
-  - [ ] check the status of workflows
+- [o] Add a cli tool to 
+  - [o] check the status of workflows
   - [ ] Control workflows, stop, continue, delete
-- [ ] Add support for event triggers
 - [ ] Make it distributed

@@ -8,7 +8,7 @@ use std::{
 
 use workflow::engine::handle_start;
 use workflow::engine::handle_stop;
-use workflow::parser::parse;
+use workflow::parser::process;
 
 use std::collections::BTreeMap;
 // use std::io::{BufRead, BufReader, Cursor, Read};
@@ -98,7 +98,7 @@ pub fn cli() {
         }
         Commands::Add { file_path } => {
             println!("Adding file: {}", file_path);
-            if let Err(e) = parse(file_path.to_string()) {
+            if let Err(e) = process(file_path.to_string()) {
                 println!("Failed to add file, {}", e);
                 std::process::exit(1);
             }

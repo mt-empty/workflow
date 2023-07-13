@@ -7,9 +7,7 @@ events:
     tasks:
       - name: foo
         description: First task
-        path: ./tests/tasks/create_foo.sh.sh
-        on_failure:
-          message: "file does not exist"
+        path: ./tests/tasks/create_foo.sh
+        on_failure: ./tests/tasks/free.sh
       - path: ./tests/tasks/create_foo2.sh.sh
-        on_failure:
-          path: ./tests/tasks/free.sh
+        on_failure: ./tests/tasks/free.sh
