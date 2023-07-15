@@ -1,0 +1,11 @@
+name: weather checks
+description: Perform weather checks
+events:
+  - name: WeatherEvent
+    description: Triggered when chance of rain is more than ten percent
+    trigger: ./tests/events/weather_check.sh
+    tasks:
+      - name: WeatherAPI
+        description: Store the current public weather in a file
+        path: ./tests/tasks/weather_api.sh
+        on_failure: ./tests/tasks/log_error.sh

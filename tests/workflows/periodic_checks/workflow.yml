@@ -1,0 +1,15 @@
+name: periodic checks
+description: Perform periodic checks
+events:
+  - name: PeriodicEvent
+    description: Triggered when current time is a multiple of 5
+    trigger: ./time_check.sh
+    tasks:
+      - name: SystemFileCheck
+        description: Peek into a system file and output the current logged-in user
+        path: ./tasks/system_file_check.sh
+        on_failure: ./tasks/log_error.sh
+      - name: MemoryUsageCheck
+        description: Print current memory usage
+        path: ./tasks/memory_usage_check.sh
+        on_failure: ./tasks/log_error.sh
