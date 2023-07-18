@@ -3,12 +3,12 @@ description: check if file exists
 events:
   - name: Event1
     description: First event
-    trigger: ./tests/events/event.sh
+    trigger: ./events/event.sh
     tasks:
       - name: foo
         description: First task
-        path: ./tests/tasks/create_foo.sh
-        on_failure: ./tests/tasks/ls.sh
-      - path: ./tests/tasks/create_bar.sh.sh
-        on_failure: ./tests/tasks/ls.sh
-      - path: ./tests/tasks/free.sh
+        path: ./tasks/create_foo.sh
+        on_failure: ./tasks/ls.sh
+      - path: ./tasks/create_bar.sh.sh
+        on_failure: ./tasks/ls.sh
+      - path: ./tasks/free.sh

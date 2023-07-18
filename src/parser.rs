@@ -3,7 +3,8 @@ use serde_derive::Deserialize;
 use serde_derive::Serialize;
 use std::fs::File;
 
-use crate::utils::push_task_to_queue;
+use crate::utils::insert_event_into_db;
+use crate::utils::push_tasks_to_queue;
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workflow {
@@ -40,7 +41,7 @@ pub fn process(yaml_file_path: String) -> Result<(), AnyError> {
     println!("name: {:?}", workflow.name);
     println!("description: {:?}", workflow.description);
 
-    let mut events = Vec::new();
+    // let mut events = Vec::new();
 
     for e in workflow.events {
         // println!("name: {:?}", e.name);
@@ -69,29 +70,11 @@ pub fn process(yaml_file_path: String) -> Result<(), AnyError> {
             trigger: e.trigger,
             tasks: tasks.clone(),
         };
-
-        events.push(event.clone());
+        insert_event_into_db(event)?;
+        // events.push(event.clone());
     }
 
-    println!("events: {:?}", events);
+    // println!("events: {:?}", events);
 
     Ok(())
 }
-
-// let redis_result = get_redis_con();
-// if let Err(e) = redis_result {
-//     println!("Failed to connect to redis {}", e);
-//     println!("exiting...");
-//     std::process::exit(1);
-// }
-// let mut redis_con = redis_result.unwrap();
-// let mock_task = Task {
-//     uid: 1,
-//     name: "name".to_string(),
-//     description: "description".to_string(),
-//     date: "date".to_string(),
-//     time: "time".to_string(),
-//     file: "./tests/tasks/create_foo.sh".to_string(),
-// };
-// let serialized_task = serialize(&mock_task).unwrap();
-// redis_con.rpush("test", serialized_task)?;

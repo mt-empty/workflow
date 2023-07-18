@@ -6,11 +6,12 @@ use std::{
     io::Read,
 };
 
+use std::collections::BTreeMap;
 use workflow::engine::handle_start;
 use workflow::engine::handle_stop;
 use workflow::parser::process;
-
-use std::collections::BTreeMap;
+use workflow::utils::create_postgres_client;
+use workflow::utils::create_redis_connection;
 // use std::io::{BufRead, BufReader, Cursor, Read};
 // use std::path::{Path, PathBuf};
 // mod utils;
@@ -30,7 +31,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     // Starts the engine
-    Start {},
+    Start {
+        // add detach flag
+        #[clap(short, long)]
+        detach: bool,
+    },
     // Stops the engine
     Engine {},
     Stop {},
@@ -62,7 +67,7 @@ pub fn cli() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Start {} => {
+        Commands::Start { detach } => {
             println!("Starting the engine");
             let stdout_file =
                 File::create("engine_stdout.txt").expect("Failed to create stdout file");
@@ -125,4 +130,26 @@ pub fn cli() {
             // Add your logic for the 'list' Commands here
         }
     }
+}
+
+fn is_redis_running() -> bool {
+    let redis_result = create_redis_connection();
+    if let Err(e) = redis_result {
+        eprintln!("Failed to connect to redis {}", e);
+        return false;
+    }
+    true
+}
+
+fn is_postgres_running() -> bool {
+    let mut client = create_postgres_client();
+    if let Err(e) = client {
+        eprintln!("Failed to create a postgres client {}", e);
+        return false;
+    }
+    true
+}
+
+fn is_engine_running() -> bool {
+    is_redis_running() && is_postgres_running()
 }

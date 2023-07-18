@@ -10,10 +10,11 @@ use std::fmt::{Display, Formatter};
 use std::process::Command as ShellCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread::sleep;
 use std::time::Duration;
 use std::{env, fmt, str, thread};
 
-use crate::utils::{create_postgres_client, create_redis_connection};
+use crate::utils::{self, create_postgres_client, create_redis_connection, push_tasks_to_queue};
 use std::fs::File;
 
 enum TaskStatus {
@@ -34,7 +35,23 @@ impl Display for TaskStatus {
     }
 }
 
-enum EngineStatus {
+pub enum EventStatus {
+    Created,
+    Succeeded,
+    Failed,
+}
+
+impl Display for EventStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            EventStatus::Created => write!(f, "Created"),
+            EventStatus::Succeeded => write!(f, "Succeeded"),
+            EventStatus::Failed => write!(f, "Failed"),
+        }
+    }
+}
+
+pub enum EngineStatus {
     Running,
     Stopped,
 }
@@ -50,12 +67,12 @@ impl Display for EngineStatus {
 
 #[derive(Serialize, Deserialize)]
 pub struct EngineTask {
-    pub uid: u32,
+    pub uid: i32,
     pub name: String,
     pub description: String,
     pub date: String,
     pub time: String,
-    pub file: String,
+    pub path: String,
 }
 
 impl fmt::Display for EngineTask {
@@ -65,18 +82,17 @@ impl fmt::Display for EngineTask {
         writeln!(f, "\tdescription: {}", self.description)?;
         writeln!(f, "\tdate: {}", self.date)?;
         writeln!(f, "\ttime: {}", self.time)?;
-        writeln!(f, "\tfile: {}", self.file)?;
+        writeln!(f, "\tpath: {}", self.path)?;
         Ok(())
     }
 }
 
 pub struct EngineEvent {
-    pub uid: u32,
+    pub uid: i32,
     pub name: String,
     pub description: String,
-    pub date: String,
-    pub time: String,
     pub trigger: String,
+    pub status: String,
 }
 
 impl fmt::Display for EngineEvent {
@@ -84,8 +100,6 @@ impl fmt::Display for EngineEvent {
         writeln!(f, "\tuid: {}", self.uid)?;
         writeln!(f, "\tname: {}", self.name)?;
         writeln!(f, "\tdescription: {}", self.description)?;
-        writeln!(f, "\tdate: {}", self.date)?;
-        writeln!(f, "\ttime: {}", self.time)?;
         writeln!(f, "\ttrigger: {}", self.trigger)?;
         Ok(())
     }
@@ -99,6 +113,20 @@ pub fn handle_start() -> Result<(), AnyError> {
         r.store(false, Ordering::SeqCst);
     })
     .expect("Error setting Ctrl-C handler");
+
+    let thread_pool_result = ThreadPoolBuilder::new().num_threads(2).build();
+    let thread_pool = thread_pool_result.unwrap();
+    if let Err(e) = initialize_tables() {
+        eprintln!("Failed to create initial tables {}", e);
+        eprintln!("exiting...");
+        std::process::exit(1);
+    }
+    // spawn poll_event
+    let _ = poll_events();
+    // thread_pool.spawn(move || {
+    //     let _  poll_events();
+    // });
+    println!("Started event polling");
 
     if let Err(e) = workflow_engine(running) {
         eprintln!("Failed to start engine, {}", e);
@@ -151,23 +179,23 @@ fn workflow_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
         std::process::exit(1);
     }
     let mut redis_con = redis_result.unwrap();
-    let mock_task = EngineTask {
-        uid: 1,
-        name: "name".to_string(),
-        description: "description".to_string(),
-        date: "date".to_string(),
-        time: "time".to_string(),
-        file: "./tests/tasks/create_foo.sh".to_string(),
-    };
+    // let mock_task = EngineTask {
+    //     uid: 1,
+    //     name: "name".to_string(),
+    //     description: "description".to_string(),
+    //     date: "date".to_string(),
+    //     time: "time".to_string(),
+    //     path: "./tests/tasks/create_foo.sh".to_string(),
+    // };
     let mut postgres_client = create_postgres_client()?;
     postgres_client.execute("
     INSERT INTO engine_status (status, started_at) VALUES ($1, NOW()) ON CONFLICT (id) DO UPDATE SET status = $1, started_at = NOW() WHERE engine_status.id = 1;
     ", &[&EngineStatus::Running.to_string()])?;
 
-    let serialized_task = serialize(&mock_task).unwrap();
-    redis_con.rpush("test", serialized_task)?;
+    // let serialized_task = serialize(&mock_task).unwrap();
+    // redis_con.rpush("test", serialized_task)?;
     while running.load(Ordering::SeqCst) {
-        let task: Option<redis::Value> = redis_con.lpop("test", Default::default())?;
+        let task: Option<redis::Value> = redis_con.lpop(utils::QUEUE_NAME, Default::default())?;
         match task {
             Some(value) => {
                 let popped_value: String = FromRedisValue::from_redis_value(&value)?;
@@ -186,7 +214,7 @@ fn workflow_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
             }
         }
 
-        // check is the engine has received a stop signal
+        // check if the engine has received a stop signal
         let received_stop_signal_result = postgres_client.query(
             "SELECT stop_signal FROM engine_status WHERE stop_signal = true",
             &[],
@@ -205,7 +233,7 @@ fn workflow_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
             }
         }
 
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(2000));
     }
     println!("\nCtrl+C signal detected. Exiting...");
 
@@ -224,19 +252,35 @@ fn initialize_tables() -> Result<(), Error> {
     // TODO: remove constraint on engine_status table after implementing multiple engine instances
     postgres_client.batch_execute(
         "
-        CREATE TABLE IF NOT EXISTS tasks (
+
+        CREATE TABLE IF NOT EXISTS events (
             uid             SERIAL PRIMARY KEY,
             name            VARCHAR NOT NULL,
             description     VARCHAR NOT NULL,
-            file            VARCHAR NOT NULL,
+            trigger         VARCHAR NOT NULL,
             status          VARCHAR NOT NULL,
+            created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+            triggered_at    TIMESTAMP,
+            deleted_at      TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            uid             SERIAL PRIMARY KEY,
+            event_uid       INTEGER NOT NULL,
+            name            VARCHAR NOT NULL,
+            description     VARCHAR NOT NULL,
+            path            VARCHAR NOT NULL,
+            status          VARCHAR NOT NULL,
+            on_failure      VARCHAR,
             created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
             updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
             deleted_at      TIMESTAMP,
-            completed_at    TIMESTAMP
+            completed_at    TIMESTAMP,
+            CONSTRAINT fk_event_uid
+                FOREIGN KEY(event_uid)
+                    REFERENCES events(uid) ON DELETE CASCADE ON UPDATE CASCADE
         );
 
-        
         DROP TABLE IF EXISTS engine_status;
         CREATE TABLE IF NOT EXISTS engine_status (
             id              SERIAL PRIMARY KEY,
@@ -251,6 +295,68 @@ fn initialize_tables() -> Result<(), Error> {
     )
 }
 
+fn poll_events() -> Result<(), Error> {
+    let mut postgres_client = create_postgres_client()?;
+
+    let mut redis_con = create_redis_connection();
+
+    let mut event_uids: Vec<i32> = Vec::new();
+
+    loop {
+        let events = postgres_client.query(
+            "SELECT uid, name, description, trigger, status FROM events WHERE status != $1",
+            &[&EventStatus::Succeeded.to_string()],
+        )?;
+
+        for event in events {
+            let event_uid: i32 = event.get("uid");
+
+            let event_name: String = event.get(1);
+            let event_description: String = event.get(2);
+            let event_trigger: String = event.get(3);
+            let event_status: String = event.get(4);
+
+            let event = EngineEvent {
+                uid: event_uid,
+                name: event_name,
+                description: event_description,
+                trigger: event_trigger,
+                status: event_status,
+            };
+            println!("Event: {}", event);
+            // async execute_event
+            let _ = execute_event(event);
+        }
+
+        if event_uids.is_empty() {
+            println!("No events to process");
+            thread::sleep(Duration::from_millis(2000));
+        }
+
+        // check if the engine has received a stop signal
+        let received_stop_signal_result = postgres_client.query(
+            "SELECT stop_signal FROM engine_status WHERE stop_signal = true",
+            &[],
+        );
+        match received_stop_signal_result {
+            Ok(rows) => {
+                if !rows.is_empty() {
+                    println!("Received stop signal");
+                    break;
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to query engine status {}", e);
+                eprintln!("exiting...");
+                std::process::exit(1);
+            }
+        }
+
+        event_uids.clear();
+    }
+    Ok(())
+}
+
 fn execute_task(task: EngineTask) -> Result<(), AnyError> {
     println!("Task Executor");
 
@@ -258,18 +364,18 @@ fn execute_task(task: EngineTask) -> Result<(), AnyError> {
     let mut postgres_client = postgres_result?;
 
     let task_uid = postgres_client.execute(
-        "INSERT INTO tasks (name, description, file, status) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO tasks (name, description, path, status) VALUES ($1, $2, $3, $4)",
         &[
             &task.name,
             &task.description,
-            &task.file,
+            &task.path,
             &TaskStatus::Running.to_string(),
         ],
     )?;
 
     // thread::sleep(Duration::from_millis(5000));
     let output = ShellCommand::new("sh")
-        .arg(task.file)
+        .arg(task.path)
         .output()
         .expect("failed to execute process");
 
@@ -279,7 +385,49 @@ fn execute_task(task: EngineTask) -> Result<(), AnyError> {
     )?;
 
     println!("status: {}", output.status);
-    // write to disk
+    // TODO: write to disk
+    println!("stdout: {}", str::from_utf8(&output.stdout)?);
+    println!("stderr: {}", str::from_utf8(&output.stderr)?);
+    Ok(())
+}
+
+fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
+    println!("Event Executor");
+
+    let postgres_result = create_postgres_client();
+    let mut postgres_client = postgres_result?;
+
+    // thread::sleep(Duration::from_millis(5000));
+    let output = ShellCommand::new("sh")
+        .arg(event.trigger)
+        .output()
+        .expect("failed to execute process");
+
+    // if shell command return 0, then the event was triggered successfully
+    if output.status.code().unwrap() == 0 {
+        postgres_client.execute(
+            "UPDATE events SET status = $1 , triggered_at = NOW() WHERE uid = $2",
+            &[&EventStatus::Succeeded.to_string(), &(event.uid as i32)],
+        )?;
+        // push tasks uid to queue
+        let event_tasks = postgres_client.query(
+            "SELECT uid FROM tasks WHERE event_uid = $1",
+            &[&(event.uid as i32)],
+        )?;
+        let converted_task_ids: Vec<i32> = event_tasks
+            .iter()
+            .map(|row| row.get(0))
+            .collect::<Vec<i32>>();
+        push_tasks_to_queue(&converted_task_ids);
+    } else {
+        postgres_client.execute(
+            "UPDATE events SET status = $1 , triggered_at = NOW() WHERE uid = $2",
+            &[&EventStatus::Failed.to_string(), &(event.uid as i32)],
+        )?;
+    };
+
+    println!("status: {}", output.status);
+    // TODO: write to disk
     println!("stdout: {}", str::from_utf8(&output.stdout)?);
     println!("stderr: {}", str::from_utf8(&output.stderr)?);
     Ok(())

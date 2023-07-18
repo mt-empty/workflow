@@ -47,4 +47,5 @@ SELECT * FROM engine_status;
 - [o] Add a cli tool to 
   - [o] check the status of workflows
   - [ ] Control workflows, stop, continue, delete
+- [ ] Use Diesel for database access
 - [ ] Make it distributed
