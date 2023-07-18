@@ -3,7 +3,7 @@ description: check if file exists
 events:
   - name: Event1
     description: First event
-    trigger: ./events/event.sh
+    trigger: ./ping.sh
     tasks:
       - name: foo
         description: First task

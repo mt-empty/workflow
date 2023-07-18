@@ -7,6 +7,7 @@ use rayon::ThreadPoolBuilder;
 use redis::{Commands as RedisCommand, FromRedisValue, RedisResult};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
+use std::path::Path;
 use std::process::Command as ShellCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -311,10 +312,10 @@ fn poll_events() -> Result<(), Error> {
         for event in events {
             let event_uid: i32 = event.get("uid");
 
-            let event_name: String = event.get(1);
-            let event_description: String = event.get(2);
-            let event_trigger: String = event.get(3);
-            let event_status: String = event.get(4);
+            let event_name: String = event.get("name");
+            let event_description: String = event.get("description");
+            let event_trigger: String = event.get("trigger");
+            let event_status: String = event.get("status");
 
             let event = EngineEvent {
                 uid: event_uid,
@@ -373,9 +374,12 @@ fn execute_task(task: EngineTask) -> Result<(), AnyError> {
         ],
     )?;
 
-    // thread::sleep(Duration::from_millis(5000));
+    let path_basename = Path::new(&task.path).file_name().unwrap();
+    let path_dirname = Path::new(&task.path).parent().unwrap();
+
     let output = ShellCommand::new("sh")
-        .arg(task.path)
+        .arg(path_basename)
+        .current_dir(path_dirname)
         .output()
         .expect("failed to execute process");
 
@@ -397,9 +401,12 @@ fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
     let postgres_result = create_postgres_client();
     let mut postgres_client = postgres_result?;
 
+    let path_basename = Path::new(&event.trigger).file_name().unwrap();
+    let path_dirname = Path::new(&event.trigger).parent().unwrap();
     // thread::sleep(Duration::from_millis(5000));
     let output = ShellCommand::new("sh")
-        .arg(event.trigger)
+        .arg(path_basename)
+        .current_dir(path_dirname)
         .output()
         .expect("failed to execute process");
 
@@ -407,22 +414,20 @@ fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
     if output.status.code().unwrap() == 0 {
         postgres_client.execute(
             "UPDATE events SET status = $1 , triggered_at = NOW() WHERE uid = $2",
-            &[&EventStatus::Succeeded.to_string(), &(event.uid as i32)],
+            &[&EventStatus::Succeeded.to_string(), &event.uid],
         )?;
         // push tasks uid to queue
-        let event_tasks = postgres_client.query(
-            "SELECT uid FROM tasks WHERE event_uid = $1",
-            &[&(event.uid as i32)],
-        )?;
+        let event_tasks =
+            postgres_client.query("SELECT uid FROM tasks WHERE event_uid = $1", &[&event.uid])?;
         let converted_task_ids: Vec<i32> = event_tasks
             .iter()
             .map(|row| row.get(0))
             .collect::<Vec<i32>>();
-        push_tasks_to_queue(&converted_task_ids);
+        let _ = push_tasks_to_queue(&converted_task_ids);
     } else {
         postgres_client.execute(
             "UPDATE events SET status = $1 , triggered_at = NOW() WHERE uid = $2",
-            &[&EventStatus::Failed.to_string(), &(event.uid as i32)],
+            &[&EventStatus::Failed.to_string(), &event.uid],
         )?;
     };
 

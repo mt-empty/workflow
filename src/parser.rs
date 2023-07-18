@@ -1,10 +1,10 @@
+use crate::utils::insert_event_into_db;
+use crate::utils::push_tasks_to_queue;
 use anyhow::{Error as AnyError, Ok, Result};
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
+use std::env;
 use std::fs::File;
-
-use crate::utils::insert_event_into_db;
-use crate::utils::push_tasks_to_queue;
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workflow {
@@ -43,22 +43,33 @@ pub fn process(yaml_file_path: String) -> Result<(), AnyError> {
 
     // let mut events = Vec::new();
 
+    let workflow_root_path = std::path::Path::new(&yaml_file_path)
+        .parent()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+
+    let workflow_path = env::current_dir()
+        .expect("Failed to get current directory")
+        .join(workflow_root_path);
+
     for e in workflow.events {
         // println!("name: {:?}", e.name);
         // println!("description: {:?}", e.description);
         // println!("trigger: {:?}", e.trigger);
         let mut tasks = Vec::new();
-        for a in e.tasks {
+        for t in e.tasks {
             // println!("name: {:?}", a.name);
             // println!("description: {:?}", a.description);
             // println!("path: {:?}", a.path);
             // println!("path: {:?}", a.on_failure);
 
             let task = Task {
-                name: a.name,
-                description: a.description,
-                path: a.path,
-                on_failure: a.on_failure,
+                name: t.name,
+                description: t.description,
+                path: workflow_path.join(t.path).to_str().unwrap().to_string(),
+                on_failure: t.on_failure,
             };
 
             tasks.push(task.clone());
@@ -67,7 +78,7 @@ pub fn process(yaml_file_path: String) -> Result<(), AnyError> {
         let event = Event {
             name: e.name,
             description: e.description,
-            trigger: e.trigger,
+            trigger: workflow_path.join(e.trigger).to_str().unwrap().to_string(),
             tasks: tasks.clone(),
         };
         insert_event_into_db(event)?;
