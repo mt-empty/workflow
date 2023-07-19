@@ -1,5 +1,5 @@
 #! /bin/bash
 set -e
-file_path=./tests/tasks/foo.txt
+file_path=./foo.txt
 rm $file_path | true
 touch $file_path 

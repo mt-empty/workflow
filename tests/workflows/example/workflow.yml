@@ -9,6 +9,6 @@ events:
         description: First task
         path: ./tasks/create_foo.sh
         on_failure: ./tasks/ls.sh
-      - path: ./tasks/create_bar.sh.sh
+      - path: ./tasks/create_bar.sh
         on_failure: ./tasks/ls.sh
       - path: ./tasks/free.sh
