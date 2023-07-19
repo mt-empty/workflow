@@ -422,7 +422,7 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
     let path_basename = Path::new(&task.path).file_name().unwrap();
     let path_dirname = Path::new(&task.path).parent().unwrap();
 
-    let output = ShellCommand::new("sh")
+    let output = ShellCommand::new("bash")
         .arg(path_basename)
         .current_dir(path_dirname)
         .output()
@@ -457,7 +457,7 @@ fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
     let path_basename = Path::new(&event.trigger).file_name().unwrap();
     let path_dirname = Path::new(&event.trigger).parent().unwrap();
     // thread::sleep(Duration::from_millis(5000));
-    let output = ShellCommand::new("sh")
+    let output = ShellCommand::new("bash")
         .arg(path_basename)
         .current_dir(path_dirname)
         .output()
