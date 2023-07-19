@@ -60,5 +60,4 @@ other/
 .vscode/launch.json
 shortcut-rust-client.code-workspace
 .env
-engine_stdout.txt
-engine_stderr.txt
+logs

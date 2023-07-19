@@ -1,5 +1,6 @@
 use anyhow::{Error as AnyError, Ok, Result};
 use clap::{Parser, Subcommand};
+use std::os::unix::process;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
@@ -66,6 +67,52 @@ enum Commands {
     List,
 }
 
+#[derive(PartialEq)]
+enum ProcessType {
+    Setup,
+    Task,
+    Event,
+}
+
+fn create_and_clear_log_file(file_path: &str) -> Result<File, AnyError> {
+    let _ = std::fs::create_dir("./logs");
+    let file = File::create(file_path)?;
+    let _ = std::fs::write(file_path, "");
+    Ok(file)
+}
+
+fn start_process(subcommand_name: &str, process_type: ProcessType) -> Result<(), AnyError> {
+    let _ = std::fs::create_dir("./logs");
+
+    let stdout_path = match process_type {
+        ProcessType::Setup => "./logs/setup_stdout.txt",
+        ProcessType::Task => "./logs/task_stdout.txt",
+        ProcessType::Event => "./logs/event_stdout.txt",
+    };
+    let stderr_path = match process_type {
+        ProcessType::Setup => "./logs/setup_stderr.txt",
+        ProcessType::Task => "./logs/task_stderr.txt",
+        ProcessType::Event => "./logs/event_stderr.txt",
+    };
+    let stdout = create_and_clear_log_file(stdout_path)?;
+    let stderr = create_and_clear_log_file(stderr_path)?;
+
+    let mut binding = Command::new("cargo");
+    let command = binding
+        .arg("run")
+        // .arg("--bin")
+        .arg(subcommand_name)
+        .stdout(stdout)
+        .stderr(stderr);
+
+    let mut child = command.spawn()?;
+
+    if process_type == ProcessType::Setup {
+        let _ = child.wait()?;
+    }
+    Ok(())
+}
+
 pub fn cli() {
     let cli = Cli::parse();
 
@@ -73,46 +120,23 @@ pub fn cli() {
         Commands::Start { detach } => {
             println!("Starting the Engine");
 
-            let output = Command::new("cargo")
-                .arg("run")
-                // .arg("--bin")
-                .arg("setup")
-                .output()
-                .expect("Failed to start Engine");
+            if let Err(e) = start_process("setup", ProcessType::Setup) {
+                eprintln!("Failed to start Setup process: {}", e);
+                eprintln!("exiting...");
+                std::process::exit(1);
+            }
 
-            println!("output: {:?}", output.stdout);
+            if let Err(e) = start_process("start-event-process", ProcessType::Event) {
+                eprintln!("Failed to start Event process: {}", e);
+                eprintln!("exiting...");
+                std::process::exit(1);
+            }
 
-            let event_stdout =
-                File::create("event_stdout.txt").expect("Failed to create stdout file");
-            // delete the content of the file
-            let _ = std::fs::write("event_stdout.txt", "");
-            let event_stderr =
-                File::create("event_stderr.txt").expect("Failed to create stderr file");
-            let _ = std::fs::write("event_stderr.txt", "");
-            Command::new("cargo")
-                .arg("run")
-                // .arg("--bin")
-                .arg("start-event-process")
-                .stderr(event_stderr)
-                .stdout(event_stdout)
-                .spawn()
-                .expect("Failed to start Engine");
-
-            let task_stdout =
-                File::create("task_stdout.txt").expect("Failed to create stdout file");
-            // delete the content of the file
-            let _ = std::fs::write("engine_stdout.txt", "");
-            let task_stderr =
-                File::create("task_stderr.txt").expect("Failed to create stderr file");
-            let _ = std::fs::write("task_stderr.txt", "");
-            Command::new("cargo")
-                .arg("run")
-                // .arg("--bin")
-                .arg("start-task-process")
-                .stderr(task_stderr)
-                .stdout(task_stdout)
-                .spawn()
-                .expect("Failed to start Engine");
+            if let Err(e) = start_process("start-task-process", ProcessType::Task) {
+                eprintln!("Failed to start Task process: {}", e);
+                eprintln!("exiting...");
+                std::process::exit(1);
+            }
 
             println!("Engine started successfully");
             std::process::exit(0);
