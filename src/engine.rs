@@ -7,6 +7,7 @@ use rayon::ThreadPoolBuilder;
 use redis::{Commands as RedisCommand, FromRedisValue, RedisResult};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
+use std::os::unix::process;
 use std::path::Path;
 use std::process::Command as ShellCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,7 +40,7 @@ impl Display for TaskStatus {
 pub enum EventStatus {
     Created,
     Succeeded,
-    Failed,
+    Retrying,
 }
 
 impl Display for EventStatus {
@@ -47,7 +48,7 @@ impl Display for EventStatus {
         match self {
             EventStatus::Created => write!(f, "Created"),
             EventStatus::Succeeded => write!(f, "Succeeded"),
-            EventStatus::Failed => write!(f, "Failed"),
+            EventStatus::Retrying => write!(f, "Retrying"),
         }
     }
 }
@@ -69,21 +70,51 @@ impl Display for EngineStatus {
 #[derive(Serialize, Deserialize)]
 pub struct EngineTask {
     pub uid: i32,
+    pub event_uid: i32,
     pub name: String,
     pub description: String,
-    pub date: String,
-    pub time: String,
+    pub status: String,
     pub path: String,
+    pub on_failure: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: String,
+    pub completed_at: String,
 }
 
 impl fmt::Display for EngineTask {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         writeln!(f, "\tuid: {}", self.uid)?;
+        writeln!(f, "\tevent_uid: {}", self.event_uid)?;
         writeln!(f, "\tname: {}", self.name)?;
         writeln!(f, "\tdescription: {}", self.description)?;
-        writeln!(f, "\tdate: {}", self.date)?;
-        writeln!(f, "\ttime: {}", self.time)?;
+        writeln!(f, "\tstatus: {}", self.status)?;
         writeln!(f, "\tpath: {}", self.path)?;
+        writeln!(f, "\ton_failure: {}", self.on_failure)?;
+        writeln!(f, "\tcreated_at: {}", self.created_at)?;
+        writeln!(f, "\tupdated_at: {}", self.updated_at)?;
+        writeln!(f, "\tdeleted_at: {}", self.deleted_at)?;
+        writeln!(f, "\tcompleted_at: {}", self.completed_at)?;
+        Ok(())
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct LightTask {
+    pub uid: i32,
+    pub path: String,
+    pub on_failure: Option<String>,
+}
+
+impl Display for LightTask {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        writeln!(f, "\tuid: {}", self.uid)?;
+        writeln!(f, "\tpath: {}", self.path)?;
+        writeln!(
+            f,
+            "\ton_failure: {}",
+            self.on_failure.as_ref().unwrap_or(&"None".to_string())
+        )?;
         Ok(())
     }
 }
@@ -106,7 +137,10 @@ impl fmt::Display for EngineEvent {
     }
 }
 
-pub fn handle_start() -> Result<(), AnyError> {
+fn run_process<F>(process_name: &str, process_fn: F) -> Result<(), AnyError>
+where
+    F: FnOnce(Arc<AtomicBool>) -> Result<(), AnyError>,
+{
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
@@ -115,28 +149,22 @@ pub fn handle_start() -> Result<(), AnyError> {
     })
     .expect("Error setting Ctrl-C handler");
 
-    let thread_pool_result = ThreadPoolBuilder::new().num_threads(2).build();
-    let thread_pool = thread_pool_result.unwrap();
-    if let Err(e) = initialize_tables() {
-        eprintln!("Failed to create initial tables {}", e);
+    if let Err(e) = process_fn(running) {
+        eprintln!("Failed to start {} process: {}", process_name, e);
         eprintln!("exiting...");
         std::process::exit(1);
     }
-    // spawn poll_event
-    let _ = poll_events();
-    // thread_pool.spawn(move || {
-    //     let _  poll_events();
-    // });
-    println!("Started event polling");
-
-    if let Err(e) = workflow_engine(running) {
-        eprintln!("Failed to start engine, {}", e);
-        eprintln!("exiting...");
-        std::process::exit(1);
-    }
-    println!("Engine stopped correctly");
+    println!("{} process stopped correctly", process_name);
 
     Ok(())
+}
+
+pub fn run_task_process() -> Result<(), AnyError> {
+    run_process("Task", queue_processor)
+}
+
+pub fn run_event_process() -> Result<(), AnyError> {
+    run_process("Event", poll_events)
 }
 
 pub fn handle_stop() -> Result<(), AnyError> {
@@ -150,7 +178,7 @@ pub fn handle_stop() -> Result<(), AnyError> {
     Ok(())
 }
 
-fn workflow_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
+fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
     // // Open the file in write-only mode
     // let file = File::create("output.txt").expect("Failed to create file");
 
@@ -167,12 +195,12 @@ fn workflow_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
         std::process::exit(1);
     }
     let thread_pool = thread_pool_result.unwrap();
-    if let Err(e) = initialize_tables() {
-        eprintln!("Failed to create initial tables {}", e);
-        eprintln!("exiting...");
-        std::process::exit(1);
-    }
-    println!("Created initial postgres tables");
+    // if let Err(e) = initialize_tables() {
+    //     eprintln!("Failed to create initial tables {}", e);
+    //     eprintln!("exiting...");
+    //     std::process::exit(1);
+    // }
+    // println!("Created initial postgres tables");
     let redis_result = create_redis_connection();
     if let Err(e) = redis_result {
         eprintln!("Failed to connect to redis {}", e);
@@ -203,7 +231,7 @@ fn workflow_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
                 // If the program exists, then thread_pool will be dropped and all threads will be stopped
                 // which means that threads will not be able to complete their current task
                 thread_pool.spawn(move || {
-                    let task: EngineTask = deserialize(popped_value.as_bytes()).unwrap();
+                    let task: LightTask = deserialize(popped_value.as_bytes()).unwrap();
                     println!("Task: {}", task);
                     if let Err(e) = execute_task(task) {
                         eprintln!("Failed to execute task {}", e);
@@ -236,7 +264,10 @@ fn workflow_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
 
         thread::sleep(Duration::from_millis(2000));
     }
-    println!("\nCtrl+C signal detected. Exiting...");
+
+    if !running.load(Ordering::SeqCst) {
+        println!("\nCtrl+C signal detected. Exiting...");
+    }
 
     postgres_client.execute(
         "
@@ -246,7 +277,18 @@ fn workflow_engine(running: Arc<AtomicBool>) -> Result<(), AnyError> {
     Ok(())
 }
 
-fn initialize_tables() -> Result<(), Error> {
+pub fn initialize_tables() -> Result<(), Error> {
+    // let redis_result = create_redis_connection();
+    // if let Err(e) = redis_result {
+    //     eprintln!("Failed to connect to redis {}", e);
+    //     eprintln!("exiting...");
+    //     std::process::exit(1);
+    // }
+    // let mut redis_con = redis_result.unwrap();
+
+    // // delete redis queue
+    // redis_con.del(utils::QUEUE_NAME)?;
+
     let mut postgres_client = create_postgres_client()?;
 
     //using postgres, create a table to store the state of workflow engine tasks
@@ -293,17 +335,17 @@ fn initialize_tables() -> Result<(), Error> {
 
         ALTER TABLE engine_status ADD CONSTRAINT engine_status_unique CHECK (id = 1);
         ",
-    )
+    )?;
+    println!("Created initial postgres tables");
+    Ok(())
 }
 
-fn poll_events() -> Result<(), Error> {
+fn poll_events(running: Arc<AtomicBool>) -> Result<(), AnyError> {
     let mut postgres_client = create_postgres_client()?;
-
-    let mut redis_con = create_redis_connection();
 
     let mut event_uids: Vec<i32> = Vec::new();
 
-    loop {
+    while running.load(Ordering::SeqCst) {
         let events = postgres_client.query(
             "SELECT uid, name, description, trigger, status FROM events WHERE status != $1",
             &[&EventStatus::Succeeded.to_string()],
@@ -355,24 +397,27 @@ fn poll_events() -> Result<(), Error> {
 
         event_uids.clear();
     }
+    if !running.load(Ordering::SeqCst) {
+        println!("\nCtrl+C signal detected. Exiting...");
+    }
     Ok(())
 }
 
-fn execute_task(task: EngineTask) -> Result<(), AnyError> {
+fn execute_task(task: LightTask) -> Result<(), AnyError> {
     println!("Task Executor");
 
     let postgres_result = create_postgres_client();
     let mut postgres_client = postgres_result?;
 
-    let task_uid = postgres_client.execute(
-        "INSERT INTO tasks (name, description, path, status) VALUES ($1, $2, $3, $4)",
-        &[
-            &task.name,
-            &task.description,
-            &task.path,
-            &TaskStatus::Running.to_string(),
-        ],
-    )?;
+    // let task_uid = postgres_client.execute(
+    //     "INSERT INTO tasks (name, description, path, status) VALUES ($1, $2, $3, $4)",
+    //     &[
+    //         &task.name,
+    //         &task.description,
+    //         &task.path,
+    //         &TaskStatus::Running.to_string(),
+    //     ],
+    // )?;
 
     let path_basename = Path::new(&task.path).file_name().unwrap();
     let path_dirname = Path::new(&task.path).parent().unwrap();
@@ -383,10 +428,18 @@ fn execute_task(task: EngineTask) -> Result<(), AnyError> {
         .output()
         .expect("failed to execute process");
 
-    postgres_client.execute(
-        "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
-        &[&TaskStatus::Completed.to_string(), &(task_uid as i32)],
-    )?;
+    if output.status.code().unwrap() == 0 {
+        postgres_client.execute(
+            "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
+            &[&TaskStatus::Completed.to_string(), &task.uid],
+        )?;
+        // TODO on failure
+    } else {
+        postgres_client.execute(
+            "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
+            &[&TaskStatus::Failed.to_string(), &task.uid],
+        )?;
+    }
 
     println!("status: {}", output.status);
     // TODO: write to disk
@@ -417,17 +470,28 @@ fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
             &[&EventStatus::Succeeded.to_string(), &event.uid],
         )?;
         // push tasks uid to queue
-        let event_tasks =
-            postgres_client.query("SELECT uid FROM tasks WHERE event_uid = $1", &[&event.uid])?;
-        let converted_task_ids: Vec<i32> = event_tasks
+        let event_tasks = postgres_client.query(
+            "SELECT uid, path, on_failure FROM tasks WHERE event_uid = $1",
+            &[&event.uid],
+        )?;
+        let light_tasks: Vec<LightTask> = event_tasks
             .iter()
-            .map(|row| row.get(0))
-            .collect::<Vec<i32>>();
-        let _ = push_tasks_to_queue(&converted_task_ids);
+            .map(|row| {
+                let uid: i32 = row.get("uid");
+                let path: String = row.get("path");
+                let on_failure: Option<String> = row.get("on_failure");
+                LightTask {
+                    uid,
+                    path,
+                    on_failure,
+                }
+            })
+            .collect::<Vec<LightTask>>();
+        let _ = push_tasks_to_queue(light_tasks);
     } else {
         postgres_client.execute(
             "UPDATE events SET status = $1 , triggered_at = NOW() WHERE uid = $2",
-            &[&EventStatus::Failed.to_string(), &event.uid],
+            &[&EventStatus::Retrying.to_string(), &event.uid],
         )?;
     };
 

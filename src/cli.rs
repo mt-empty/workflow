@@ -1,14 +1,15 @@
 use anyhow::{Error as AnyError, Ok, Result};
 use clap::{Parser, Subcommand};
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 use std::{
     fs::{read_to_string, File},
     io::Read,
 };
 
-use std::collections::BTreeMap;
-use workflow::engine::handle_start;
-use workflow::engine::handle_stop;
+use workflow::engine::{handle_stop, run_event_process};
+use workflow::engine::{initialize_tables, run_task_process};
 use workflow::parser::process;
 use workflow::utils::create_postgres_client;
 use workflow::utils::create_redis_connection;
@@ -37,7 +38,9 @@ enum Commands {
         detach: bool,
     },
     // Stops the engine
-    Engine {},
+    Setup {},
+    StartTaskProcess {},
+    StartEventProcess {},
     Stop {},
     /// Adds workflow to the queue
     Add {
@@ -68,28 +71,72 @@ pub fn cli() {
 
     match &cli.command {
         Commands::Start { detach } => {
-            println!("Starting the engine");
-            let stdout_file =
-                File::create("engine_stdout.txt").expect("Failed to create stdout file");
+            println!("Starting the Engine");
+
+            let output = Command::new("cargo")
+                .arg("run")
+                // .arg("--bin")
+                .arg("setup")
+                .output()
+                .expect("Failed to start Engine");
+
+            println!("output: {:?}", output.stdout);
+
+            let event_stdout =
+                File::create("event_stdout.txt").expect("Failed to create stdout file");
             // delete the content of the file
-            let _ = std::fs::write("engine_stdout.txt", "");
-            let stderr_file =
-                File::create("engine_stderr.txt").expect("Failed to create stderr file");
-            let _ = std::fs::write("engine_stderr.txt", "");
+            let _ = std::fs::write("event_stdout.txt", "");
+            let event_stderr =
+                File::create("event_stderr.txt").expect("Failed to create stderr file");
+            let _ = std::fs::write("event_stderr.txt", "");
             Command::new("cargo")
                 .arg("run")
                 // .arg("--bin")
-                .arg("engine")
-                .stderr(stderr_file)
-                .stdout(stdout_file)
+                .arg("start-event-process")
+                .stderr(event_stderr)
+                .stdout(event_stdout)
                 .spawn()
-                .expect("Failed to start engine");
+                .expect("Failed to start Engine");
+
+            let task_stdout =
+                File::create("task_stdout.txt").expect("Failed to create stdout file");
+            // delete the content of the file
+            let _ = std::fs::write("engine_stdout.txt", "");
+            let task_stderr =
+                File::create("task_stderr.txt").expect("Failed to create stderr file");
+            let _ = std::fs::write("task_stderr.txt", "");
+            Command::new("cargo")
+                .arg("run")
+                // .arg("--bin")
+                .arg("start-task-process")
+                .stderr(task_stderr)
+                .stdout(task_stdout)
+                .spawn()
+                .expect("Failed to start Engine");
+
+            println!("Engine started successfully");
             std::process::exit(0);
         }
-        Commands::Engine {} => {
-            println!("Engine");
-            if let Err(e) = handle_start() {
-                println!("Failed to start the engine, {}", e);
+        Commands::Setup {} => {
+            println!("Setup");
+
+            if let Err(e) = initialize_tables() {
+                eprintln!("Failed to create initial tables: {}", e);
+                eprintln!("exiting...");
+                std::process::exit(1);
+            }
+        }
+        Commands::StartEventProcess {} => {
+            println!("StartEventProcess");
+            if let Err(e) = run_event_process() {
+                println!("Failed to start event process, {}", e);
+                std::process::exit(1);
+            };
+        }
+        Commands::StartTaskProcess {} => {
+            println!("StartTaskProcess");
+            if let Err(e) = run_task_process() {
+                println!("Failed to start task process, {}", e);
                 std::process::exit(1);
             };
         }

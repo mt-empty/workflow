@@ -7,7 +7,7 @@ use std::env;
 
 use crate::{
     engine::EngineTask,
-    engine::EventStatus,
+    engine::{EventStatus, LightTask},
     parser::{Event, Task},
 };
 
@@ -34,8 +34,8 @@ pub fn create_postgres_client() -> Result<Client, Error> {
 
     Ok(client)
 }
-
-pub fn push_tasks_to_queue(task_uids: &[i32]) -> Result<(), AnyError> {
+// This only pushes a light version of the task to the queue
+pub fn push_tasks_to_queue(tasks: Vec<LightTask>) -> Result<(), AnyError> {
     let redis_result = create_redis_connection();
     if let Err(e) = redis_result {
         eprintln!("Failed to connect to redis {}", e);
@@ -43,8 +43,8 @@ pub fn push_tasks_to_queue(task_uids: &[i32]) -> Result<(), AnyError> {
         std::process::exit(1);
     }
     let mut redis_con = redis_result.unwrap();
-    for task_uid in task_uids {
-        let serialized_task: Vec<u8> = serialize(&task_uid).unwrap();
+    for light_task in tasks {
+        let serialized_task: Vec<u8> = serialize(&light_task).unwrap();
         redis_con.rpush(QUEUE_NAME, serialized_task)?;
     }
     Ok(())

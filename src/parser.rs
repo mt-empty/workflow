@@ -1,5 +1,4 @@
 use crate::utils::insert_event_into_db;
-use crate::utils::push_tasks_to_queue;
 use anyhow::{Error as AnyError, Ok, Result};
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
