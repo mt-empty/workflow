@@ -40,12 +40,39 @@ SELECT * FROM engine_status;
 
 ## TODO
 - [o] test suite
-- [o] Add support for event triggers
-- [o] Add a cli tool to 
+- [x] Add support for event triggers
+- [x] Add a cli tool to 
   - [x] parse workflow yaml files
-  - [ ] add tasks to workflow queue 
+  - [x] add tasks to workflow queue 
 - [o] Add a cli tool to 
   - [o] check the status of workflows
   - [ ] Control workflows, stop, continue, delete
 - [ ] Use Diesel for database access
 - [ ] Make it distributed
+
+
+## Usage
+
+```yaml
+name: check file exists
+description: check if file exists
+events:
+  - name: Event1
+    description: First event
+    trigger: ./ping.sh
+    tasks:
+      - name: foo
+        description: First task
+        path: ./tasks/create_foo.sh
+        on_failure: ./tasks/ls.sh
+      - path: ./tasks/create_bar.sh
+        on_failure: ./tasks/ls.sh
+      - path: ./tasks/free.sh
+```
+
+```bash
+cargo run add ./path/to/workflow.yaml
+```
+The events and tasks will be added to the queue.
+
+More examples can be found in the `tests/workflows` directory.
