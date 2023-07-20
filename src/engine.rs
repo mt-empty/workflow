@@ -179,15 +179,6 @@ pub fn handle_stop() -> Result<(), AnyError> {
 }
 
 fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
-    // // Open the file in write-only mode
-    // let file = File::create("output.txt").expect("Failed to create file");
-
-    // // Obtain the raw file descriptor
-    // let file_descriptor = file.as_raw_fd();
-
-    // // Create a writeable handle from the file descriptor
-    // let mut writeable = unsafe { File::from_raw_fd(file_descriptor) };
-
     let thread_pool_result = ThreadPoolBuilder::new().num_threads(4).build();
     if let Err(e) = thread_pool_result {
         eprintln!("Failed to create thread pool {}", e);
@@ -195,12 +186,7 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
         std::process::exit(1);
     }
     let thread_pool = thread_pool_result.unwrap();
-    // if let Err(e) = initialize_tables() {
-    //     eprintln!("Failed to create initial tables {}", e);
-    //     eprintln!("exiting...");
-    //     std::process::exit(1);
-    // }
-    // println!("Created initial postgres tables");
+
     let redis_result = create_redis_connection();
     if let Err(e) = redis_result {
         eprintln!("Failed to connect to redis {}", e);
@@ -208,21 +194,12 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
         std::process::exit(1);
     }
     let mut redis_con = redis_result.unwrap();
-    // let mock_task = EngineTask {
-    //     uid: 1,
-    //     name: "name".to_string(),
-    //     description: "description".to_string(),
-    //     date: "date".to_string(),
-    //     time: "time".to_string(),
-    //     path: "./tests/tasks/create_foo.sh".to_string(),
-    // };
+
     let mut postgres_client = create_postgres_client()?;
     postgres_client.execute("
     INSERT INTO engine_status (status, started_at) VALUES ($1, NOW()) ON CONFLICT (id) DO UPDATE SET status = $1, started_at = NOW() WHERE engine_status.id = 1;
     ", &[&EngineStatus::Running.to_string()])?;
 
-    // let serialized_task = serialize(&mock_task).unwrap();
-    // redis_con.rpush("test", serialized_task)?;
     while running.load(Ordering::SeqCst) {
         let task: Option<redis::Value> = redis_con.lpop(utils::QUEUE_NAME, Default::default())?;
         match task {
@@ -409,16 +386,6 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
     let postgres_result = create_postgres_client();
     let mut postgres_client = postgres_result?;
 
-    // let task_uid = postgres_client.execute(
-    //     "INSERT INTO tasks (name, description, path, status) VALUES ($1, $2, $3, $4)",
-    //     &[
-    //         &task.name,
-    //         &task.description,
-    //         &task.path,
-    //         &TaskStatus::Running.to_string(),
-    //     ],
-    // )?;
-
     let path_basename = Path::new(&task.path).file_name().unwrap();
     let path_dirname = Path::new(&task.path).parent().unwrap();
 
@@ -454,9 +421,9 @@ fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
     let postgres_result = create_postgres_client();
     let mut postgres_client = postgres_result?;
 
-    let path_basename = Path::new(&event.trigger).file_name().unwrap();
-    let path_dirname = Path::new(&event.trigger).parent().unwrap();
-    // thread::sleep(Duration::from_millis(5000));
+    let path_basename = Path::new(&event.trigger).file_name().unwrap(); // TODO
+    let path_dirname = Path::new(&event.trigger).parent().unwrap(); // TODO
+                                                                    // thread::sleep(Duration::from_millis(5000));
     let output = ShellCommand::new("bash")
         .arg(path_basename)
         .current_dir(path_dirname)

@@ -35,12 +35,10 @@ fn parse_yaml_file(file_path: &str) -> Result<Workflow, AnyError> {
     Ok(workflow)
 }
 
-pub fn process(yaml_file_path: String) -> Result<(), AnyError> {
+pub fn process_yaml_file(yaml_file_path: String) -> Result<(), AnyError> {
     let workflow = parse_yaml_file(&yaml_file_path)?;
     println!("name: {:?}", workflow.name);
     println!("description: {:?}", workflow.description);
-
-    // let mut events = Vec::new();
 
     let workflow_root_path = std::path::Path::new(&yaml_file_path)
         .parent()
@@ -54,16 +52,8 @@ pub fn process(yaml_file_path: String) -> Result<(), AnyError> {
         .join(workflow_root_path);
 
     for e in workflow.events {
-        // println!("name: {:?}", e.name);
-        // println!("description: {:?}", e.description);
-        // println!("trigger: {:?}", e.trigger);
         let mut tasks = Vec::new();
         for t in e.tasks {
-            // println!("name: {:?}", a.name);
-            // println!("description: {:?}", a.description);
-            // println!("path: {:?}", a.path);
-            // println!("path: {:?}", a.on_failure);
-
             let task = Task {
                 name: t.name,
                 description: t.description,
@@ -81,10 +71,7 @@ pub fn process(yaml_file_path: String) -> Result<(), AnyError> {
             tasks: tasks.clone(),
         };
         insert_event_into_db(event)?;
-        // events.push(event.clone());
     }
-
-    // println!("events: {:?}", events);
 
     Ok(())
 }

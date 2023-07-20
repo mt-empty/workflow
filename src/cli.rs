@@ -1,17 +1,14 @@
 use anyhow::{Error as AnyError, Ok, Result};
 use clap::{Parser, Subcommand};
+use std::fs::File;
 use std::os::unix::process;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
-use std::{
-    fs::{read_to_string, File},
-    io::Read,
-};
 
 use workflow::engine::{handle_stop, run_event_process};
 use workflow::engine::{initialize_tables, run_task_process};
-use workflow::parser::process;
+use workflow::parser::process_yaml_file;
 use workflow::utils::create_postgres_client;
 use workflow::utils::create_redis_connection;
 // use std::io::{BufRead, BufReader, Cursor, Read};
@@ -174,7 +171,7 @@ pub fn cli() {
         }
         Commands::Add { file_path } => {
             println!("Adding file: {}", file_path);
-            if let Err(e) = process(file_path.to_string()) {
+            if let Err(e) = process_yaml_file(file_path.to_string()) {
                 println!("Failed to add file, {}", e);
                 std::process::exit(1);
             }

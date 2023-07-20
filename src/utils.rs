@@ -6,7 +6,6 @@ use redis::{Commands, RedisResult};
 use std::env;
 
 use crate::{
-    engine::EngineTask,
     engine::{EventStatus, LightTask},
     parser::{Event, Task},
 };
