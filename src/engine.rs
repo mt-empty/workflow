@@ -386,7 +386,10 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
     let postgres_result = create_postgres_client();
     let mut postgres_client = postgres_result?;
 
-    let path_basename = Path::new(&task.path).file_name().unwrap();
+    let path_basename = match Path::new(&task.path).file_name() {
+        Some(basename) => basename,
+        None => return Err(AnyError::msg("Failed to get path basename")),
+    };
     let path_dirname = Path::new(&task.path).parent().unwrap();
 
     let output = ShellCommand::new("bash")
@@ -400,7 +403,7 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
             "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
             &[&TaskStatus::Completed.to_string(), &task.uid],
         )?;
-        // TODO on failure
+        // TODO run on failure
     } else {
         postgres_client.execute(
             "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
@@ -421,9 +424,13 @@ fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
     let postgres_result = create_postgres_client();
     let mut postgres_client = postgres_result?;
 
-    let path_basename = Path::new(&event.trigger).file_name().unwrap(); // TODO
-    let path_dirname = Path::new(&event.trigger).parent().unwrap(); // TODO
-                                                                    // thread::sleep(Duration::from_millis(5000));
+    let path_basename = match Path::new(&event.trigger).file_name() {
+        Some(basename) => basename,
+        None => return Err(AnyError::msg("Failed to get path basename")),
+    };
+
+    let path_dirname = Path::new(&event.trigger).parent().unwrap();
+    // thread::sleep(Duration::from_millis(5000));
     let output = ShellCommand::new("bash")
         .arg(path_basename)
         .current_dir(path_dirname)
