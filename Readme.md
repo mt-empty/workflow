@@ -1,12 +1,12 @@
 # Workflow
 
-Readability oriented workflow engine.
+A simple readability oriented event driven workflow engine.
 ## Features
 
 - Event driven via  
 ## Limitations
 
-When an event gets triggered depending on the resource it might take a while for the event to be processed.
+When an event gets triggered depending on the resources available it might take a while for the event to be processed.
 
 ## Setup
 
@@ -17,13 +17,21 @@ echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> .env
 echo "REDIS_URL=redis://localhost" >> .env
 ```
 
-Clippy 
+Start the containers
 
 ```bash
-cargo clippy --fix -- -W clippy::pedantic -W clippy::nursery -W clippy::unwrap_used -W clippy::todo -W clippy::dbg_macro -W clippy::print_stdout -W clippy::unimplemented
-
+chmod +x ./start.sh
+./start.sh
 ```
 
+Start the engine
+```
+cargo run -- --help
+cargo run start
+cargo run add tests/workflows/weather_checks/workflow.yml
+```
+
+### Accessing containers
 
 Postgres
 
@@ -37,6 +45,15 @@ docker exec -it workflow-postgres psql -U postgres -d postgres
 SELECT * FROM engine_status;
 ```
 
+Redis
+
+```bash
+docker exec -it workflow-redis redis-cli
+```
+
+```redis
+LRANGE tasks 0 -1
+```
 
 ## TODO
 - [o] test suite
@@ -52,6 +69,8 @@ SELECT * FROM engine_status;
 
 
 ## Usage
+
+Example workflow yaml file
 
 ```yaml
 name: check file exists
@@ -73,6 +92,6 @@ events:
 ```bash
 cargo run add ./path/to/workflow.yaml
 ```
-The events and tasks will be added to the queue.
+The events and tasks will be added to redis queue.
 
-More examples can be found in the `tests/workflows` directory.
+More examples can be found in `tests/workflows` directory.
