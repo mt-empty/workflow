@@ -95,3 +95,6 @@ cargo run add ./path/to/workflow.yaml
 The events and tasks will be added to redis queue.
 
 More examples can be found in `tests/workflows` directory.
+
+
+If you are looking for a powerful workflow platform, check out [Windmill](https://github.com/windmill-labs/windmill)
