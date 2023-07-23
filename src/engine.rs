@@ -1,6 +1,7 @@
 use anyhow::Error as AnyError;
 use bincode::{deserialize, serialize};
 use ctrlc::set_handler;
+use diesel::PgConnection;
 use dotenv::dotenv;
 use postgres::{Client, Error, NoTls};
 use rayon::ThreadPoolBuilder;
@@ -16,8 +17,13 @@ use std::thread::sleep;
 use std::time::Duration;
 use std::{env, fmt, str, thread};
 
-use crate::utils::{self, create_postgres_client, create_redis_connection, push_tasks_to_queue};
-use std::fs::File;
+use crate::models::Engine;
+use crate::schema::*;
+use crate::utils::{
+    self, create_postgres_client, create_redis_connection, establish_pg_connection,
+    push_tasks_to_queue,
+};
+use crate::{models, schema};
 
 enum TaskStatus {
     Pending,
@@ -168,14 +174,31 @@ pub fn run_event_process() -> Result<(), AnyError> {
 }
 
 pub fn handle_stop() -> Result<(), AnyError> {
-    let mut postgres_client = create_postgres_client()?;
-    postgres_client.execute(
-        "
-    UPDATE engine_status SET stop_signal = true WHERE ID = 1;
-    ",
-        &[],
-    )?;
+    // let mut postgres_client = create_postgres_client()?;
+    // postgres_client.execute(
+    //     "
+    // UPDATE engine_status SET stop_signal = true WHERE ID = 1;
+    // ",
+    //     &[],
+    // )?;
+    diesel::update(schema::engines::dsl::engines.find(1))
+        .set(schema::engines::stop_signal.eq(true))
+        .execute(&mut establish_pg_connection())
+        .expect("Error updating engine status");
     Ok(())
+}
+
+use diesel::prelude::*;
+
+pub fn create_engine(conn: &mut PgConnection, name: &str, ip_address: &str) -> Engine {
+    use crate::schema::engines;
+
+    let new_engine = models::NewEngine { name, ip_address };
+
+    diesel::insert_into(engines::table)
+        .values(&new_engine)
+        .get_result(conn)
+        .expect("Error saving new engine")
 }
 
 fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
@@ -195,10 +218,12 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
     }
     let mut redis_con = redis_result.unwrap();
 
-    let mut postgres_client = create_postgres_client()?;
-    postgres_client.execute("
-    INSERT INTO engine_status (status, started_at) VALUES ($1, NOW()) ON CONFLICT (id) DO UPDATE SET status = $1, started_at = NOW() WHERE engine_status.id = 1;
-    ", &[&EngineStatus::Running.to_string()])?;
+    // let mut postgres_client = create_postgres_client()?;
+    // postgres_client.execute("
+    // INSERT INTO engine_status (status, started_at) VALUES ($1, NOW()) ON CONFLICT (id) DO UPDATE SET status = $1, started_at = NOW() WHERE engine_status.id = 1;
+    // ", &[&EngineStatus::Running.to_string()])?;
+    let pg_conn = &mut establish_pg_connection();
+    let engine = create_engine(pg_conn, "first", "0.0.0.0");
 
     while running.load(Ordering::SeqCst) {
         let task: Option<redis::Value> = redis_con.lpop(utils::QUEUE_NAME, Default::default())?;
@@ -221,16 +246,25 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
         }
 
         // check if the engine has received a stop signal
-        let received_stop_signal_result = postgres_client.query(
-            "SELECT stop_signal FROM engine_status WHERE stop_signal = true",
-            &[],
-        );
+        // let received_stop_signal_result = postgres_client.query(
+        //     "SELECT stop_signal FROM engine_status WHERE stop_signal = true",
+        //     &[],
+        // );
+
+        let received_stop_signal_result = schema::engines::dsl::engines
+            .find(engine.id)
+            .select(Engine::stop_signal)
+            .first(pg_conn)
+            .Optional();
         match received_stop_signal_result {
-            Ok(rows) => {
-                if !rows.is_empty() {
+            Ok(Some(stop_signal)) => {
+                if stop_signal == true {
                     println!("Received stop signal");
                     break;
                 }
+            }
+            Ok(None) => {
+                println!("No stop signal");
             }
             Err(e) => {
                 eprintln!("Failed to query engine status {}", e);
@@ -245,12 +279,17 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
     if !running.load(Ordering::SeqCst) {
         println!("\nCtrl+C signal detected. Exiting...");
     }
+    let updated_results = diesel::update(schema::engines::dsl::engines.find(engine.id))
+        .set(schema::engines::stopped_at.eq(diesel::dsl::now))
+        .set(schema::engines::status.eq(EngineStatus::Stopped.to_string()))
+        .get_result::<Engine>(pg_conn)
+        .expect(format!("Error updating {} engine", engine.id));
 
-    postgres_client.execute(
-        "
-        UPDATE engine_status SET status = $1, stopped_at = NOW() WHERE ID = 1",
-        &[&EngineStatus::Stopped.to_string()],
-    )?;
+    // postgres_client.execute(
+    //     "
+    //     UPDATE engine_status SET status = $1, stopped_at = NOW() WHERE ID = 1",
+    //     &[&EngineStatus::Stopped.to_string()],
+    // )?;
     Ok(())
 }
 

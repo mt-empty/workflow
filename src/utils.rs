@@ -1,5 +1,7 @@
 use anyhow::{Error as AnyError, Result};
 use bincode::serialize;
+use diesel::pg::PgConnection;
+use diesel::prelude::*;
 use dotenv::dotenv;
 use postgres::{Client, Error, NoTls};
 use redis::{Commands, RedisResult};
@@ -17,6 +19,14 @@ pub fn create_redis_connection() -> RedisResult<redis::Connection> {
     let client = redis::Client::open(env::var("REDIS_URL").expect("Redis url not set"))?;
     let con = client.get_connection()?;
     Ok(con)
+}
+
+pub fn establish_pg_connection() -> PgConnection {
+    dotenv().ok();
+
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    PgConnection::establish(&database_url)
+        .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
 }
 
 pub fn create_postgres_client() -> Result<Client, Error> {
@@ -50,45 +60,58 @@ pub fn push_tasks_to_queue(tasks: Vec<LightTask>) -> Result<(), AnyError> {
 }
 
 // TODO, insert workflow into bd, instead of the two functions bellow
-pub fn insert_event_into_db(event: Event) -> Result<(), AnyError> {
-    let client_result = create_postgres_client();
-    if let Err(e) = client_result {
-        eprintln!("Failed to connect to postgres {}", e);
-        eprintln!("exiting...");
-        std::process::exit(1);
-    }
-    let mut client = client_result.unwrap();
+pub fn insert_event_into_db(conn: &mut PgConnection, event: Event) -> Result<(), AnyError> {
+    // let client_result = create_postgres_client();
+    // if let Err(e) = client_result {
+    //     eprintln!("Failed to connect to postgres {}", e);
+    //     eprintln!("exiting...");
+    //     std::process::exit(1);
+    // }
+    // let mut client = client_result.unwrap();
 
     let event_name = event.name;
     let event_description = event.description;
     let event_trigger = event.trigger;
+    use crate::schema::events::dsl::*;
+    let event_uid = diesel::insert_into(events::table)
+        .values((
+            name.eq(event_name),
+            description.eq(event_description),
+            trigger.eq(event_trigger),
+            status.eq(EventStatus::Created.to_string()),
+        ))
+        .returning(uid)
+        .get_result::<i32>(conn)?;
+    // let result = client.query_one(
+    //     "INSERT INTO events (name, description, trigger, status) VALUES ($1, $2, $3, $4) RETURNING uid",
+    //     &[
+    //         &event_name,
+    //         &event_description,
+    //         &event_trigger,
+    //         &EventStatus::Created.to_string(),
+    //     ],
+    // )?;
+    // println!("results: {:?}", result);
+    // let event_uid: i32 = result.get("uid");
+    // println!("uid: {:?}", event_uid);
 
-    let result = client.query_one(
-        "INSERT INTO events (name, description, trigger, status) VALUES ($1, $2, $3, $4) RETURNING uid",
-        &[
-            &event_name,
-            &event_description,
-            &event_trigger,
-            &EventStatus::Created.to_string(),
-        ],
-    )?;
-    println!("results: {:?}", result);
-    let event_uid: i32 = result.get("uid");
-    println!("uid: {:?}", event_uid);
-
-    insert_event_tasks_into_db(event.tasks, event_uid)?;
+    insert_event_tasks_into_db(conn, event.tasks, event_uid)?;
 
     Ok(())
 }
 
-pub fn insert_event_tasks_into_db(tasks: Vec<Task>, event_uid: i32) -> Result<(), AnyError> {
-    let client_result: std::result::Result<Client, Error> = create_postgres_client();
-    if let Err(e) = client_result {
-        eprintln!("Failed to connect to postgres {}", e);
-        eprintln!("exiting...");
-        std::process::exit(1);
-    }
-    let mut client = client_result.unwrap();
+pub fn insert_event_tasks_into_db(
+    conn: &mut PgConnection,
+    tasks: Vec<Task>,
+    event_uid: i32,
+) -> Result<(), AnyError> {
+    // let client_result: std::result::Result<Client, Error> = create_postgres_client();
+    // if let Err(e) = client_result {
+    //     eprintln!("Failed to connect to postgres {}", e);
+    //     eprintln!("exiting...");
+    //     std::process::exit(1);
+    // }
+    // let mut client = client_result.unwrap();
 
     for task in tasks {
         let task_name = task.name.unwrap_or("None".to_string());
@@ -97,10 +120,21 @@ pub fn insert_event_tasks_into_db(tasks: Vec<Task>, event_uid: i32) -> Result<()
         let task_on_failure = task.on_failure;
         let task_status = EventStatus::Created.to_string();
 
-        client.execute(
-            "INSERT INTO tasks (event_uid, name, description, path, on_failure, status) VALUES ($1, $2, $3, $4, $5, $6)",
-            &[&event_uid, &task_name, &task_description, &task_path, &task_on_failure, &task_status],
-        )?;
+        diesel::insert_into(crate::schema::tasks::table)
+            .values((
+                crate::schema::tasks::event_uid.eq(event_uid),
+                crate::schema::tasks::name.eq(task_name),
+                crate::schema::tasks::description.eq(task_description),
+                crate::schema::tasks::path.eq(task_path),
+                crate::schema::tasks::on_failure.eq(task_on_failure),
+                crate::schema::tasks::status.eq(task_status),
+            ))
+            .execute(conn)?; // TODO: check if this is the correct way to do it
+
+        // client.execute(
+        //     "INSERT INTO tasks (event_uid, name, description, path, on_failure, status) VALUES ($1, $2, $3, $4, $5, $6)",
+        //     &[&event_uid, &task_name, &task_description, &task_path, &task_on_failure, &task_status],
+        // )?;
     }
 
     Ok(())
