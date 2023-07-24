@@ -1,20 +1,11 @@
 // @generated automatically by Diesel CLI.
 
-pub mod sql_types {
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "engine_status"))]
-    pub struct EngineStatus;
-}
-
 diesel::table! {
-    use diesel::sql_types::*;
-    use super::sql_types::EngineStatus;
-
-    engines (id) {
-        id -> Int4,
+    engines (uid) {
+        uid -> Int4,
         name -> Varchar,
         ip_address -> Varchar,
-        status -> EngineStatus,
+        status -> Varchar,
         stop_signal -> Bool,
         started_at -> Timestamp,
         stopped_at -> Timestamp,
@@ -24,8 +15,8 @@ diesel::table! {
 diesel::table! {
     events (uid) {
         uid -> Int4,
-        name -> Varchar,
-        description -> Varchar,
+        name -> Nullable<Varchar>,
+        description -> Nullable<Varchar>,
         trigger -> Varchar,
         status -> Varchar,
         created_at -> Timestamp,
@@ -38,8 +29,8 @@ diesel::table! {
     tasks (uid) {
         uid -> Int4,
         event_uid -> Int4,
-        name -> Varchar,
-        description -> Varchar,
+        name -> Nullable<Varchar>,
+        description -> Nullable<Varchar>,
         path -> Varchar,
         status -> Varchar,
         on_failure -> Nullable<Varchar>,

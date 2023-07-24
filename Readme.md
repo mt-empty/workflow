@@ -64,7 +64,7 @@ LRANGE tasks 0 -1
 - [o] Add a cli tool to 
   - [o] check the status of workflows
   - [ ] Control workflows, stop, continue, delete
-- [ ] Use Diesel for database access
+- [o] Use Diesel for database access
 - [ ] Make it distributed
 
 
@@ -96,5 +96,6 @@ The events and tasks will be added to redis queue.
 
 More examples can be found in `tests/workflows` directory.
 
+---
 
 If you are looking for a powerful workflow platform, check out [Windmill](https://github.com/windmill-labs/windmill)

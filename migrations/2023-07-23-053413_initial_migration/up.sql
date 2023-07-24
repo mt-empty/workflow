@@ -1,8 +1,8 @@
 -- Your SQL goes here
 CREATE TABLE IF NOT EXISTS events (
     uid             SERIAL PRIMARY KEY,
-    name            VARCHAR NOT NULL,
-    description     VARCHAR NOT NULL,
+    name            VARCHAR,
+    description     VARCHAR,
     trigger         VARCHAR NOT NULL,
     status          VARCHAR NOT NULL,
     created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -13,8 +13,8 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS tasks (
     uid             SERIAL PRIMARY KEY,
     event_uid       INTEGER NOT NULL,
-    name            VARCHAR NOT NULL,
-    description     VARCHAR NOT NULL,
+    name            VARCHAR,
+    description     VARCHAR,
     path            VARCHAR NOT NULL,
     status          VARCHAR NOT NULL,
     on_failure      VARCHAR,
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 -- CREATE TYPE IF NOT EXISTS engine_status AS ENUM ('Stopped', 'Started');
 CREATE TABLE IF NOT EXISTS engines (
-    id              SERIAL PRIMARY KEY,
+    uid             SERIAL PRIMARY KEY,
     name            VARCHAR NOT NULL,
     ip_address      VARCHAR NOT NULL,
     -- status          engine_status NOT NULL DEFAULT 'Stopped',
