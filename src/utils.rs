@@ -9,7 +9,9 @@ use std::env;
 
 use crate::{
     engine::{EventStatus, LightTask},
-    parser::{Event, Task},
+    models::NewEvent,
+    parser::{ParsableEvent, Task},
+    schema::events,
 };
 
 pub const QUEUE_NAME: &str = "tasks";
@@ -60,7 +62,10 @@ pub fn push_tasks_to_queue(tasks: Vec<LightTask>) -> Result<(), AnyError> {
 }
 
 // TODO, insert workflow into bd, instead of the two functions bellow
-pub fn insert_event_into_db(conn: &mut PgConnection, event: Event) -> Result<(), AnyError> {
+pub fn insert_event_into_db(
+    conn: &mut PgConnection,
+    event: ParsableEvent,
+) -> Result<i32, AnyError> {
     // let client_result = create_postgres_client();
     // if let Err(e) = client_result {
     //     eprintln!("Failed to connect to postgres {}", e);
@@ -69,19 +74,15 @@ pub fn insert_event_into_db(conn: &mut PgConnection, event: Event) -> Result<(),
     // }
     // let mut client = client_result.unwrap();
 
-    let event_name = event.name;
-    let event_description = event.description;
-    let event_trigger = event.trigger;
-    use crate::schema::events::dsl::*;
-    let event_uid = diesel::insert_into(events::table)
-        .values((
-            name.eq(event_name),
-            description.eq(event_description),
-            trigger.eq(event_trigger),
-            status.eq(EventStatus::Created.to_string()),
-        ))
-        .returning(uid)
-        .get_result::<i32>(conn)?;
+    // let event_name = event.name;
+    // let event_description = event.description;
+    // let event_trigger = event.trigger;
+    // use crate::schema::events::dsl::*;
+    // let new_event = crate::models::NewEvent {
+    //     name: &event_name,
+    //     description: &event_description,
+    //     trigger: &event_trigger,
+    // };
     // let result = client.query_one(
     //     "INSERT INTO events (name, description, trigger, status) VALUES ($1, $2, $3, $4) RETURNING uid",
     //     &[
@@ -94,10 +95,16 @@ pub fn insert_event_into_db(conn: &mut PgConnection, event: Event) -> Result<(),
     // println!("results: {:?}", result);
     // let event_uid: i32 = result.get("uid");
     // println!("uid: {:?}", event_uid);
-
-    insert_event_tasks_into_db(conn, event.tasks, event_uid)?;
-
-    Ok(())
+    let new_event = crate::models::NewEvent {
+        name: event.name.as_deref(),
+        description: event.description.as_deref(),
+        trigger: &event.trigger,
+    };
+    let event_uid = diesel::insert_into(events::table)
+        .values(&new_event)
+        .returning(events::uid)
+        .get_result::<i32>(conn)?;
+    return Ok(event_uid);
 }
 
 pub fn insert_event_tasks_into_db(

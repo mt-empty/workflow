@@ -1,10 +1,11 @@
-use crate::schema::sql_types::EngineStatus;
+// use crate::schema::sql_types::EngineStatus;
 use diesel::deserialize::{self, FromSql};
-use diesel::pg::Pg;
 use diesel::pg::{Pg, PgValue};
 use diesel::prelude::*;
 use diesel::serialize::{self, IsNull, Output, ToSql};
+use diesel::sql_types::Bool;
 use diesel::*;
+use serde_derive::{Deserialize, Serialize};
 use std::io::Write;
 
 // #[derive(SqlType)]
@@ -40,22 +41,74 @@ use std::io::Write;
 //         }
 //     }
 // }
-#[derive(Queryable, Selectable)]
+#[derive(Queryable, Selectable, PartialEq, Serialize, Deserialize)]
 #[diesel(table_name = crate::schema::engines)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Engine {
-    pub id: i32,
+    pub uid: i32,
     pub name: String,
     pub ip_address: String,
-    pub status: EngineStatus,
+    pub status: String, // TODO: change to enum
     pub stop_signal: bool,
     pub started_at: chrono::NaiveDateTime,
     pub stopped_at: chrono::NaiveDateTime,
 }
 
-// #[derive(Insertable)]
-// #[diesel(table_name = engines)]
-// pub struct NewEngine<'a> {
-//     pub name: &'a str,
-//     pub ip_address: &'a str,
-// }
+#[derive(Insertable, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[diesel(table_name = crate::schema::engines)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewEngine<'a> {
+    pub name: &'a str,
+    pub ip_address: &'a str,
+}
+
+#[derive(Queryable, Selectable, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[diesel(table_name = crate::schema::events)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct Event {
+    pub uid: i32,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub trigger: String,
+    pub status: String, // TODO: change to enum
+    pub created_at: chrono::NaiveDateTime,
+    pub triggered_at: Option<chrono::NaiveDateTime>,
+    pub deleted_at: Option<chrono::NaiveDateTime>,
+}
+
+#[derive(Insertable, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[diesel(table_name = crate::schema::events)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewEvent<'a> {
+    pub name: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub trigger: &'a str,
+}
+
+#[derive(Queryable, Selectable, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[diesel(table_name = crate::schema::tasks)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct Task {
+    pub uid: i32,
+    pub event_uid: i32,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub path: String,
+    pub on_failure: Option<String>,
+    pub status: String, // TODO: change to enum
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime,
+    pub deleted_at: Option<chrono::NaiveDateTime>,
+    pub completed_at: Option<chrono::NaiveDateTime>,
+}
+
+#[derive(Insertable, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[diesel(table_name = crate::schema::tasks)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewTask<'a> {
+    pub event_uid: i32,
+    pub name: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub path: &'a str,
+    pub on_failure: Option<&'a str>,
+}

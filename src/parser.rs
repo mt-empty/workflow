@@ -1,7 +1,7 @@
-use crate::utils::insert_event_into_db;
+use crate::models::NewEvent;
+use crate::utils::{establish_pg_connection, insert_event_into_db, insert_event_tasks_into_db};
 use anyhow::{Error as AnyError, Ok, Result};
-use serde_derive::Deserialize;
-use serde_derive::Serialize;
+use serde_derive::{Deserialize, Serialize};
 use std::env;
 use std::fs::File;
 
@@ -9,11 +9,11 @@ use std::fs::File;
 pub struct Workflow {
     pub name: Option<String>,
     pub description: Option<String>,
-    pub events: Vec<Event>,
+    pub events: Vec<ParsableEvent>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Event {
+pub struct ParsableEvent {
     pub name: Option<String>,
     pub description: Option<String>,
     pub trigger: String,
@@ -64,13 +64,16 @@ pub fn process_yaml_file(yaml_file_path: String) -> Result<(), AnyError> {
             tasks.push(task.clone());
         }
 
-        let event = Event {
+        let new_event = ParsableEvent {
             name: e.name,
             description: e.description,
             trigger: workflow_path.join(e.trigger).to_str().unwrap().to_string(),
             tasks: tasks.clone(),
         };
-        insert_event_into_db(event)?;
+        let mut conn = establish_pg_connection();
+        let event_uid = insert_event_into_db(&mut conn, new_event)?;
+
+        insert_event_tasks_into_db(&mut conn, tasks, event_uid)?;
     }
 
     Ok(())
