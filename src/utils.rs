@@ -13,7 +13,10 @@ use crate::{
     parser::{ParsableEvent, Task},
     schema::events,
 };
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use tracing::info;
 
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 pub const QUEUE_NAME: &str = "tasks";
 
 pub fn create_redis_connection() -> RedisResult<redis::Connection> {
@@ -144,5 +147,13 @@ pub fn insert_event_tasks_into_db(
         // )?;
     }
 
+    Ok(())
+}
+
+pub fn run_migrations() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    info!("Running Database migrations...");
+    let mut conn = establish_pg_connection();
+    conn.run_pending_migrations(MIGRATIONS)?;
+    info!("Database migrations complete.");
     Ok(())
 }

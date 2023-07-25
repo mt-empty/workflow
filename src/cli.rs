@@ -6,11 +6,11 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
+use workflow::engine::run_task_process;
 use workflow::engine::{handle_stop, run_event_process};
-use workflow::engine::{initialize_tables, run_task_process};
 use workflow::parser::process_yaml_file;
-// use workflow::utils::create_postgres_client;
 use workflow::utils::create_redis_connection;
+use workflow::utils::run_migrations;
 // use std::io::{BufRead, BufReader, Cursor, Read};
 // use std::path::{Path, PathBuf};
 // mod utils;
@@ -141,7 +141,7 @@ pub fn cli() {
         Commands::Setup {} => {
             println!("Setup");
 
-            if let Err(e) = initialize_tables() {
+            if let Err(e) = run_migrations() {
                 eprintln!("Failed to create initial tables: {}", e);
                 eprintln!("exiting...");
                 std::process::exit(1);
