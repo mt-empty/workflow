@@ -104,7 +104,7 @@ pub fn insert_event_into_db(
         .values(&new_event)
         .returning(events::uid)
         .get_result::<i32>(conn)?;
-    return Ok(event_uid);
+    Ok(event_uid)
 }
 
 pub fn insert_event_tasks_into_db(

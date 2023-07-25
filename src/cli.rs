@@ -9,7 +9,7 @@ use std::time::Duration;
 use workflow::engine::{handle_stop, run_event_process};
 use workflow::engine::{initialize_tables, run_task_process};
 use workflow::parser::process_yaml_file;
-use workflow::utils::create_postgres_client;
+// use workflow::utils::create_postgres_client;
 use workflow::utils::create_redis_connection;
 // use std::io::{BufRead, BufReader, Cursor, Read};
 // use std::path::{Path, PathBuf};
@@ -163,7 +163,8 @@ pub fn cli() {
         }
         Commands::Stop {} => {
             println!("Stopping the engine");
-            if let Err(e) = handle_stop() {
+            //todo: remove hardcoded value
+            if let Err(e) = handle_stop(1) {
                 println!("Failed to stop the engine, {}", e);
                 std::process::exit(1);
             };
@@ -200,24 +201,24 @@ pub fn cli() {
     }
 }
 
-fn is_redis_running() -> bool {
-    let redis_result = create_redis_connection();
-    if let Err(e) = redis_result {
-        eprintln!("Failed to connect to redis {}", e);
-        return false;
-    }
-    true
-}
+// fn is_redis_running() -> bool {
+//     let redis_result = create_redis_connection();
+//     if let Err(e) = redis_result {
+//         eprintln!("Failed to connect to redis {}", e);
+//         return false;
+//     }
+//     true
+// }
 
-fn is_postgres_running() -> bool {
-    let mut client = create_postgres_client();
-    if let Err(e) = client {
-        eprintln!("Failed to create a postgres client {}", e);
-        return false;
-    }
-    true
-}
+// fn is_postgres_running() -> bool {
+//     let mut client = create_postgres_client();
+//     if let Err(e) = client {
+//         eprintln!("Failed to create a postgres client {}", e);
+//         return false;
+//     }
+//     true
+// }
 
-fn is_engine_running() -> bool {
-    is_redis_running() && is_postgres_running()
-}
+// fn is_engine_running() -> bool {
+//     is_redis_running() && is_postgres_running()
+// }

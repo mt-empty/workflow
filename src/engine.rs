@@ -125,10 +125,11 @@ impl Display for LightTask {
     }
 }
 
+#[derive(Queryable)]
 pub struct EngineEvent {
     pub uid: i32,
-    pub name: String,
-    pub description: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
     pub trigger: String,
     pub status: String,
 }
@@ -136,8 +137,8 @@ pub struct EngineEvent {
 impl fmt::Display for EngineEvent {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         writeln!(f, "\tuid: {}", self.uid)?;
-        writeln!(f, "\tname: {}", self.name)?;
-        writeln!(f, "\tdescription: {}", self.description)?;
+        writeln!(f, "\tname: {:?}", self.name)?;
+        writeln!(f, "\tdescription: {:?}", self.description)?;
         writeln!(f, "\ttrigger: {}", self.trigger)?;
         Ok(())
     }
@@ -172,8 +173,8 @@ pub fn run_task_process() -> Result<(), AnyError> {
 pub fn run_event_process() -> Result<(), AnyError> {
     run_process("Event", poll_events)
 }
-
-pub fn handle_stop() -> Result<(), AnyError> {
+// set engine_uid to 1 by default
+pub fn handle_stop(engine_uid: i32) -> Result<(), AnyError> {
     // let mut postgres_client = create_postgres_client()?;
     // postgres_client.execute(
     //     "
@@ -181,10 +182,9 @@ pub fn handle_stop() -> Result<(), AnyError> {
     // ",
     //     &[],
     // )?;
-    diesel::update(schema::engines::dsl::engines.find(1))
+    diesel::update(schema::engines::dsl::engines.find(engine_uid))
         .set(schema::engines::stop_signal.eq(true))
-        .execute(&mut establish_pg_connection())
-        .expect("Error updating engine status");
+        .execute(&mut establish_pg_connection())?;
     Ok(())
 }
 
@@ -276,7 +276,10 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
             .select(stop_signal)
             .first(pg_conn)
             .optional();
-
+        println!(
+            "received_stop_signal_result: {:?}",
+            received_stop_signal_result
+        );
         match received_stop_signal_result {
             Ok(Some(signal_on)) => {
                 if signal_on {
@@ -379,31 +382,42 @@ pub fn initialize_tables() -> Result<(), Error> {
 }
 
 fn poll_events(running: Arc<AtomicBool>) -> Result<(), AnyError> {
-    let mut postgres_client = create_postgres_client()?;
+    // let mut postgres_client = create_postgres_client()?;
 
     let mut event_uids: Vec<i32> = Vec::new();
-
+    let mut conn = establish_pg_connection();
     while running.load(Ordering::SeqCst) {
-        let events = postgres_client.query(
-            "SELECT uid, name, description, trigger, status FROM events WHERE status != $1",
-            &[&EventStatus::Succeeded.to_string()],
-        )?;
+        // let events = postgres_client.query(
+        //     "SELECT uid, name, description, trigger, status FROM events WHERE status != $1",
+        //     &[&EventStatus::Succeeded.to_string()],
+        // )?;
+
+        let events: Vec<EngineEvent> = schema::events::dsl::events
+            .select((
+                schema::events::uid,
+                schema::events::name,
+                schema::events::description,
+                schema::events::trigger,
+                schema::events::status,
+            ))
+            .filter(schema::events::status.ne(EventStatus::Succeeded.to_string()))
+            .load(&mut conn)?;
 
         for event in events {
-            let event_uid: i32 = event.get("uid");
+            // let event_uid: i32 = event.get("uid");
 
-            let event_name: String = event.get("name");
-            let event_description: String = event.get("description");
-            let event_trigger: String = event.get("trigger");
-            let event_status: String = event.get("status");
+            // let event_name: String = event.get("name");
+            // let event_description: String = event.get("description");
+            // let event_trigger: String = event.get("trigger");
+            // let event_status: String = event.get("status");
 
-            let event = EngineEvent {
-                uid: event_uid,
-                name: event_name,
-                description: event_description,
-                trigger: event_trigger,
-                status: event_status,
-            };
+            // let event = EngineEvent {
+            //     uid: event_uid,
+            //     name: event_name,
+            //     description: event_description,
+            //     trigger: event_trigger,
+            //     status: event_status,
+            // };
             println!("Event: {}", event);
             // async execute_event
             let _ = execute_event(event);
@@ -415,16 +429,25 @@ fn poll_events(running: Arc<AtomicBool>) -> Result<(), AnyError> {
         }
 
         // check if the engine has received a stop signal
-        let received_stop_signal_result = postgres_client.query(
-            "SELECT stop_signal FROM engine_status WHERE stop_signal = true",
-            &[],
-        );
+        // let received_stop_signal_result = postgres_client.query(
+        //     "SELECT stop_signal FROM engine_status WHERE stop_signal = true",
+        //     &[],
+        // );
+        use crate::schema::engines::dsl::*;
+        let received_stop_signal_result: Result<Option<bool>, _> = engines
+            .find(1)
+            .select(stop_signal)
+            .first(&mut conn)
+            .optional();
         match received_stop_signal_result {
-            Ok(rows) => {
-                if !rows.is_empty() {
+            Ok(Some(signal_on)) => {
+                if signal_on {
                     println!("Received stop signal");
                     break;
                 }
+            }
+            Ok(None) => {
+                println!("No stop signal");
             }
             Err(e) => {
                 eprintln!("Failed to query engine status {}", e);
@@ -444,9 +467,11 @@ fn poll_events(running: Arc<AtomicBool>) -> Result<(), AnyError> {
 fn execute_task(task: LightTask) -> Result<(), AnyError> {
     println!("Task Executor");
 
-    let postgres_result = create_postgres_client();
-    let mut postgres_client = postgres_result?;
-
+    // let postgres_result = create_postgres_client();
+    // let mut postgres_client = postgres_result?;
+    use crate::schema::tasks::dsl::*;
+    let mut conn = establish_pg_connection();
+    // todo , update task status to running
     let path_basename = match Path::new(&task.path).file_name() {
         Some(basename) => basename,
         None => return Err(AnyError::msg("Failed to get path basename")),
@@ -460,16 +485,30 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
         .expect("failed to execute process");
 
     if output.status.code().unwrap() == 0 {
-        postgres_client.execute(
-            "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
-            &[&TaskStatus::Completed.to_string(), &task.uid],
-        )?;
+        // postgres_client.execute(
+        //     "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
+        //     &[&TaskStatus::Completed.to_string(), &task.uid],
+        // )?;
+        diesel::update(tasks.find(task.uid))
+            .set((
+                status.eq(TaskStatus::Completed.to_string()),
+                updated_at.eq(diesel::dsl::now),
+                completed_at.eq(diesel::dsl::now),
+            ))
+            .execute(&mut conn)?;
+
         // TODO run on failure
     } else {
-        postgres_client.execute(
-            "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
-            &[&TaskStatus::Failed.to_string(), &task.uid],
-        )?;
+        // postgres_client.execute(
+        //     "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
+        //     &[&TaskStatus::Failed.to_string(), &task.uid],
+        // )?;
+        diesel::update(tasks.find(task.uid))
+            .set((
+                status.eq(TaskStatus::Failed.to_string()),
+                updated_at.eq(diesel::dsl::now),
+            ))
+            .execute(&mut conn)?;
     }
 
     println!("status: {}", output.status);
