@@ -64,7 +64,6 @@ LRANGE tasks 0 -1
 - [o] Add a cli tool to 
   - [o] check the status of workflows
   - [ ] Control workflows, stop, continue, delete
-- [o] Use Diesel for database access
 - [ ] Make it distributed
 
 
