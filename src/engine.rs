@@ -105,7 +105,8 @@ impl fmt::Display for EngineTask {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Queryable, Selectable, Serialize, Deserialize)]
+#[diesel(table_name = crate::schema::tasks)]
 pub struct LightTask {
     pub uid: i32,
     pub path: String,
@@ -125,7 +126,8 @@ impl Display for LightTask {
     }
 }
 
-#[derive(Queryable)]
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = crate::schema::events)]
 pub struct EngineEvent {
     pub uid: i32,
     pub name: Option<String>,
@@ -276,10 +278,6 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
             .select(stop_signal)
             .first(pg_conn)
             .optional();
-        println!(
-            "received_stop_signal_result: {:?}",
-            received_stop_signal_result
-        );
         match received_stop_signal_result {
             Ok(Some(signal_on)) => {
                 if signal_on {
@@ -393,13 +391,7 @@ fn poll_events(running: Arc<AtomicBool>) -> Result<(), AnyError> {
         // )?;
 
         let events: Vec<EngineEvent> = schema::events::dsl::events
-            .select((
-                schema::events::uid,
-                schema::events::name,
-                schema::events::description,
-                schema::events::trigger,
-                schema::events::status,
-            ))
+            .select(EngineEvent::as_select())
             .filter(schema::events::status.ne(EventStatus::Succeeded.to_string()))
             .load(&mut conn)?;
 
@@ -521,8 +513,9 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
 fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
     println!("Event Executor");
 
-    let postgres_result = create_postgres_client();
-    let mut postgres_client = postgres_result?;
+    // let postgres_result = create_postgres_client();
+    // let mut postgres_client = postgres_result?;
+    let mut conn = establish_pg_connection();
 
     let path_basename = match Path::new(&event.trigger).file_name() {
         Some(basename) => basename,
@@ -539,34 +532,53 @@ fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
 
     // if shell command return 0, then the event was triggered successfully
     if output.status.code().unwrap() == 0 {
-        postgres_client.execute(
-            "UPDATE events SET status = $1 , triggered_at = NOW() WHERE uid = $2",
-            &[&EventStatus::Succeeded.to_string(), &event.uid],
-        )?;
+        {
+            use crate::schema::events::dsl::*;
+            diesel::update(events.find(event.uid))
+                .set(status.eq(EventStatus::Succeeded.to_string()))
+                .execute(&mut conn);
+        }
+        use crate::schema::tasks::dsl::*;
+        // postgres_client.execute(
+        //     "UPDATE events SET status = $1 , triggered_at = NOW() WHERE uid = $2",
+        //     &[&EventStatus::Succeeded.to_string(), &event.uid],
+        // )?;
         // push tasks uid to queue
-        let event_tasks = postgres_client.query(
-            "SELECT uid, path, on_failure FROM tasks WHERE event_uid = $1",
-            &[&event.uid],
-        )?;
-        let light_tasks: Vec<LightTask> = event_tasks
-            .iter()
-            .map(|row| {
-                let uid: i32 = row.get("uid");
-                let path: String = row.get("path");
-                let on_failure: Option<String> = row.get("on_failure");
-                LightTask {
-                    uid,
-                    path,
-                    on_failure,
-                }
-            })
-            .collect::<Vec<LightTask>>();
+        // let event_tasks = postgres_client.query(
+        //     "SELECT uid, path, on_failure FROM tasks WHERE event_uid = $1",
+        //     &[&event.uid],
+        // )?;
+
+        let light_tasks: Vec<LightTask> = tasks
+            .select(LightTask::as_select())
+            .filter(event_uid.eq(event.uid))
+            .load(&mut conn)?;
+        // let light_tasks: Vec<LightTask> = event_tasks
+        //     .iter()
+        //     .map(|row| {
+        //         let uid: i32 = row.get("uid");
+        //         let path: String = row.get("path");
+        //         let on_failure: Option<String> = row.get("on_failure");
+        //         LightTask {
+        //             uid,
+        //             path,
+        //             on_failure,
+        //         }
+        //     })
+        //     .collect::<Vec<LightTask>>();
         let _ = push_tasks_to_queue(light_tasks);
     } else {
-        postgres_client.execute(
-            "UPDATE events SET status = $1 , triggered_at = NOW() WHERE uid = $2",
-            &[&EventStatus::Retrying.to_string(), &event.uid],
-        )?;
+        use crate::schema::events::dsl::*;
+        diesel::update(events.find(event.uid))
+            .set((
+                status.eq(EventStatus::Retrying.to_string()),
+                triggered_at.eq(diesel::dsl::now),
+            ))
+            .execute(&mut conn)?;
+        // postgres_client.execute(
+        // "UPDATE events SET status = $1 , triggered_at = NOW() WHERE uid = $2",
+        // &[&EventStatus::Retrying.to_string(), &event.uid],
+        // )?;
     };
 
     println!("status: {}", output.status);
