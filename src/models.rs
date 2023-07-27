@@ -8,6 +8,8 @@ use diesel::*;
 use serde_derive::{Deserialize, Serialize};
 use std::io::Write;
 
+use crate::engine::EventStatus;
+
 // #[derive(SqlType)]
 // #[diesel(postgres_type(name = "My_Type"))]
 // pub struct MyType;
@@ -76,13 +78,27 @@ pub struct Event {
     pub deleted_at: Option<chrono::NaiveDateTime>,
 }
 
-#[derive(Insertable, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Insertable, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[diesel(table_name = crate::schema::events)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewEvent<'a> {
     pub name: Option<&'a str>,
     pub description: Option<&'a str>,
     pub trigger: &'a str,
+    pub status: String,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+impl Default for NewEvent<'_> {
+    fn default() -> Self {
+        NewEvent {
+            name: None,
+            description: None,
+            trigger: "",
+            status: EventStatus::Created.to_string(),
+            created_at: chrono::Local::now().naive_local(),
+        }
+    }
 }
 
 #[derive(Queryable, Selectable, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -102,13 +118,31 @@ pub struct Task {
     pub completed_at: Option<chrono::NaiveDateTime>,
 }
 
-#[derive(Insertable, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Insertable, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[diesel(table_name = crate::schema::tasks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewTask<'a> {
+pub struct NewTask {
     pub event_uid: i32,
-    pub name: Option<&'a str>,
-    pub description: Option<&'a str>,
-    pub path: &'a str,
-    pub on_failure: Option<&'a str>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub path: String,
+    pub on_failure: Option<String>,
+    pub status: String,
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime,
+}
+
+impl Default for NewTask {
+    fn default() -> Self {
+        NewTask {
+            event_uid: 0,
+            name: None,
+            description: None,
+            path: "".to_string(),
+            on_failure: None,
+            status: EventStatus::Created.to_string(),
+            created_at: chrono::Local::now().naive_local(),
+            updated_at: chrono::Local::now().naive_local(),
+        }
+    }
 }

@@ -39,5 +39,6 @@ CREATE TABLE IF NOT EXISTS engines (
     stopped_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+-- TODO: remove constraint on engine_status table after implementing multiple engine instances
 -- ALTER TABLE engines ADD CONSTRAINT engine_status_unique CHECK (id = 1);
 -- ALTER TABLE engines ADD CONSTRAINT engine_name_unique UNIQUE (name, ip_address);

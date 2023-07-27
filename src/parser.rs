@@ -1,4 +1,5 @@
-use crate::models::NewEvent;
+use crate::engine::EventStatus;
+use crate::models::{NewEvent, NewTask};
 use crate::utils::{establish_pg_connection, insert_event_into_db, insert_event_tasks_into_db};
 use anyhow::{Error as AnyError, Ok, Result};
 use serde_derive::{Deserialize, Serialize};
@@ -17,11 +18,11 @@ pub struct ParsableEvent {
     pub name: Option<String>,
     pub description: Option<String>,
     pub trigger: String,
-    pub tasks: Vec<Task>,
+    pub tasks: Vec<ParsableTask>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Task {
+pub struct ParsableTask {
     pub name: Option<String>,
     pub description: Option<String>,
     pub path: String,
@@ -52,27 +53,33 @@ pub fn process_yaml_file(yaml_file_path: String) -> Result<(), AnyError> {
         .join(workflow_root_path);
 
     for e in workflow.events {
+        let new_event = NewEvent {
+            name: e.name.as_deref(),
+            description: e.description.as_deref(),
+            trigger: &workflow_path.join(e.trigger).to_str().unwrap().to_string(),
+            ..Default::default()
+        };
+        // let new_event = ParsableEvent {
+        //     name: e.name,
+        //     description: e.description,
+        //     trigger: workflow_path.join(e.trigger).to_str().unwrap().to_string(),
+        //     tasks: tasks.clone(),
+        // };
+        let mut conn = establish_pg_connection();
+        let event_uid = insert_event_into_db(&mut conn, new_event)?;
+
         let mut tasks = Vec::new();
         for t in e.tasks {
-            let task = Task {
+            let task = NewTask {
+                event_uid,
                 name: t.name,
                 description: t.description,
                 path: workflow_path.join(t.path).to_str().unwrap().to_string(),
                 on_failure: t.on_failure,
+                ..Default::default()
             };
-
-            tasks.push(task.clone());
+            tasks.push(task);
         }
-
-        let new_event = ParsableEvent {
-            name: e.name,
-            description: e.description,
-            trigger: workflow_path.join(e.trigger).to_str().unwrap().to_string(),
-            tasks: tasks.clone(),
-        };
-        let mut conn = establish_pg_connection();
-        let event_uid = insert_event_into_db(&mut conn, new_event)?;
-
         insert_event_tasks_into_db(&mut conn, tasks, event_uid)?;
     }
 
