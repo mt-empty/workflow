@@ -1,9 +1,9 @@
 # Workflow
 
 A simple readability oriented event driven workflow engine.
-## Features
+## Demo
+![Click to Watch Video](./demo.webm)
 
-- Event driven via  
 ## Limitations
 
 When an event gets triggered depending on the resources available it might take a while for the event to be processed.
@@ -14,6 +14,7 @@ When an event gets triggered depending on the resources available it might take 
 
 ```bash
 echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> .env
+echo DATABASE_URL=postgres://postgres:$POSTGRES_PASSWORD@localhost:5432/postgres >> .env
 echo "REDIS_URL=redis://localhost" >> .env
 ```
 
@@ -42,7 +43,7 @@ docker exec -it workflow-postgres psql -U postgres -d postgres
 ```sql
 \dt
 
-SELECT * FROM engine_status;
+SELECT * FROM engines;
 ```
 
 Redis
@@ -69,6 +70,17 @@ LRANGE tasks 0 -1
 
 ## Usage
 
+```bash
+cargo build --release
+
+cd target/release
+./workflow --help
+./workflow start
+./workflow add ./path/to/workflow.yaml
+./workflow stop
+
+```
+
 Example workflow yaml file
 
 ```yaml
@@ -88,12 +100,11 @@ events:
       - path: ./tasks/free.sh
 ```
 
-```bash
-cargo run add ./path/to/workflow.yaml
-```
-The events and tasks will be added to redis queue.
+The events will be polled regularly and the tasks will be added to redis queue when an event is successfully triggered.
 
-More examples can be found in `tests/workflows` directory.
+std out and err logs will be created for task and event process, the logs will be stored in `./logs/` directory.
+
+More examples can be found in `tests/workflows/` directory.
 
 ---
 
