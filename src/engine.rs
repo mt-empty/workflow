@@ -1,9 +1,6 @@
 use crate::models::Engine;
 use crate::schema::*;
-use crate::utils::{
-    self, create_postgres_client, create_redis_connection, establish_pg_connection,
-    push_tasks_to_queue,
-};
+use crate::utils::{self, create_redis_connection, establish_pg_connection, push_tasks_to_queue};
 use crate::{models, schema};
 use anyhow::Error as AnyError;
 use bincode::{deserialize, serialize};
@@ -11,7 +8,6 @@ use ctrlc::set_handler;
 use diesel::sql_types::*;
 use diesel::PgConnection;
 use dotenv::dotenv;
-use postgres::{Client, Error, NoTls};
 use rayon::ThreadPoolBuilder;
 use redis::{Commands as RedisCommand, FromRedisValue, RedisResult};
 use serde::{Deserialize, Serialize};
@@ -177,13 +173,6 @@ pub fn run_event_process() -> Result<(), AnyError> {
 }
 // set engine_uid to 1 by default
 pub fn handle_stop(engine_uid: i32) -> Result<(), AnyError> {
-    // let mut postgres_client = create_postgres_client()?;
-    // postgres_client.execute(
-    //     "
-    // UPDATE engine_status SET stop_signal = true WHERE ID = 1;
-    // ",
-    //     &[],
-    // )?;
     diesel::update(schema::engines::dsl::engines.find(engine_uid))
         .set(schema::engines::stop_signal.eq(true))
         .execute(&mut establish_pg_connection())?;
@@ -226,10 +215,6 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
     }
     let mut redis_con = redis_result.unwrap();
 
-    // let mut postgres_client = create_postgres_client()?;
-    // postgres_client.execute("
-    // INSERT INTO engine_status (status, started_at) VALUES ($1, NOW()) ON CONFLICT (id) DO UPDATE SET status = $1, started_at = NOW() WHERE engine_status.id = 1;
-    // ", &[&EngineStatus::Running.to_string()])?;
     let pg_conn = &mut establish_pg_connection();
     let engine_uid = create_engine(pg_conn, "first", "0.0.0.0")?;
 
@@ -253,24 +238,6 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
             }
         }
 
-        // check if the engine has received a stop signal
-        // let received_stop_signal_result = postgres_client.query(
-        //     "SELECT stop_signal FROM engine_status WHERE stop_signal = true",
-        //     &[],
-        // );
-        // use crate::schema::engines::dsl::*;
-
-        // let received_stop_signal_result: Result<Option<stop_signal>, _> = schema::engines::table
-        //     .select(stop_signal)
-        //     .filter(uid.eq(engine_uid))
-        //     .first(pg_conn)
-        //     .optional();
-
-        // let received_stop_signal_result = schema::engines::dsl::engines
-        // .find(engine_uid)
-        // .select(Engine::)
-        // .first(pg_conn)
-        // .optional();
         use crate::schema::engines::dsl::*;
         // rust couldn't infer the type of received_stop_signal_result
         let received_stop_signal_result: Result<Option<bool>, _> = engines
@@ -308,108 +275,19 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
         ))
         .get_result::<Engine>(pg_conn)?;
 
-    // postgres_client.execute(
-    //     "
-    //     UPDATE engine_status SET status = $1, stopped_at = NOW() WHERE ID = 1",
-    //     &[&EngineStatus::Stopped.to_string()],
-    // )?;
-    Ok(())
-}
-
-pub fn initialize_tables() -> Result<(), Error> {
-    // let redis_result = create_redis_connection();
-    // if let Err(e) = redis_result {
-    //     eprintln!("Failed to connect to redis {}", e);
-    //     eprintln!("exiting...");
-    //     std::process::exit(1);
-    // }
-    // let mut redis_con = redis_result.unwrap();
-
-    // // delete redis queue
-    // redis_con.del(utils::QUEUE_NAME)?;
-
-    let mut postgres_client = create_postgres_client()?;
-
-    //using postgres, create a table to store the state of workflow engine tasks
-    // TODO: remove constraint on engine_status table after implementing multiple engine instances
-    postgres_client.batch_execute(
-        "
-
-        CREATE TABLE IF NOT EXISTS events (
-            uid             SERIAL PRIMARY KEY,
-            name            VARCHAR NOT NULL,
-            description     VARCHAR NOT NULL,
-            trigger         VARCHAR NOT NULL,
-            status          VARCHAR NOT NULL,
-            created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-            triggered_at    TIMESTAMP,
-            deleted_at      TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS tasks (
-            uid             SERIAL PRIMARY KEY,
-            event_uid       INTEGER NOT NULL,
-            name            VARCHAR NOT NULL,
-            description     VARCHAR NOT NULL,
-            path            VARCHAR NOT NULL,
-            status          VARCHAR NOT NULL,
-            on_failure      VARCHAR,
-            created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-            updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-            deleted_at      TIMESTAMP,
-            completed_at    TIMESTAMP,
-            CONSTRAINT fk_event_uid
-                FOREIGN KEY(event_uid)
-                    REFERENCES events(uid) ON DELETE CASCADE ON UPDATE CASCADE
-        );
-
-        DROP TABLE IF EXISTS engine_status;
-        CREATE TABLE IF NOT EXISTS engine_status (
-            id              SERIAL PRIMARY KEY,
-            status          VARCHAR NOT NULL,
-            stop_signal     BOOLEAN NOT NULL DEFAULT false,
-            started_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-            stopped_at      TIMESTAMP NOT NULL DEFAULT NOW()
-        );
-
-        ALTER TABLE engine_status ADD CONSTRAINT engine_status_unique CHECK (id = 1);
-        ",
-    )?;
-    println!("Created initial postgres tables");
     Ok(())
 }
 
 fn poll_events(running: Arc<AtomicBool>) -> Result<(), AnyError> {
-    // let mut postgres_client = create_postgres_client()?;
-
     let mut event_uids: Vec<i32> = Vec::new();
     let mut conn = establish_pg_connection();
     while running.load(Ordering::SeqCst) {
-        // let events = postgres_client.query(
-        //     "SELECT uid, name, description, trigger, status FROM events WHERE status != $1",
-        //     &[&EventStatus::Succeeded.to_string()],
-        // )?;
-
         let events: Vec<EngineEvent> = schema::events::dsl::events
             .select(EngineEvent::as_select())
             .filter(schema::events::status.ne(EventStatus::Succeeded.to_string()))
             .load(&mut conn)?;
 
         for event in events {
-            // let event_uid: i32 = event.get("uid");
-
-            // let event_name: String = event.get("name");
-            // let event_description: String = event.get("description");
-            // let event_trigger: String = event.get("trigger");
-            // let event_status: String = event.get("status");
-
-            // let event = EngineEvent {
-            //     uid: event_uid,
-            //     name: event_name,
-            //     description: event_description,
-            //     trigger: event_trigger,
-            //     status: event_status,
-            // };
             println!("Event: {}", event);
             // async execute_event
             let _ = execute_event(event);
@@ -420,11 +298,6 @@ fn poll_events(running: Arc<AtomicBool>) -> Result<(), AnyError> {
             thread::sleep(Duration::from_millis(2000));
         }
 
-        // check if the engine has received a stop signal
-        // let received_stop_signal_result = postgres_client.query(
-        //     "SELECT stop_signal FROM engine_status WHERE stop_signal = true",
-        //     &[],
-        // );
         use crate::schema::engines::dsl::*;
         let received_stop_signal_result: Result<Option<bool>, _> = engines
             .find(1)
@@ -459,8 +332,6 @@ fn poll_events(running: Arc<AtomicBool>) -> Result<(), AnyError> {
 fn execute_task(task: LightTask) -> Result<(), AnyError> {
     println!("Task Executor");
 
-    // let postgres_result = create_postgres_client();
-    // let mut postgres_client = postgres_result?;
     use crate::schema::tasks::dsl::*;
     let mut conn = establish_pg_connection();
     // todo , update task status to running
@@ -477,10 +348,6 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
         .expect("failed to execute process");
 
     if output.status.code().unwrap() == 0 {
-        // postgres_client.execute(
-        //     "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
-        //     &[&TaskStatus::Completed.to_string(), &task.uid],
-        // )?;
         diesel::update(tasks.find(task.uid))
             .set((
                 status.eq(TaskStatus::Completed.to_string()),
@@ -491,10 +358,6 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
 
         // TODO run on failure
     } else {
-        // postgres_client.execute(
-        //     "UPDATE tasks SET status = $1 , updated_at = NOW(), completed_at = NOW() WHERE uid = $2",
-        //     &[&TaskStatus::Failed.to_string(), &task.uid],
-        // )?;
         diesel::update(tasks.find(task.uid))
             .set((
                 status.eq(TaskStatus::Failed.to_string()),
@@ -513,8 +376,6 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
 fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
     println!("Event Executor");
 
-    // let postgres_result = create_postgres_client();
-    // let mut postgres_client = postgres_result?;
     let mut conn = establish_pg_connection();
 
     let path_basename = match Path::new(&event.trigger).file_name() {
@@ -536,36 +397,14 @@ fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
             use crate::schema::events::dsl::*;
             diesel::update(events.find(event.uid))
                 .set(status.eq(EventStatus::Succeeded.to_string()))
-                .execute(&mut conn);
+                .execute(&mut conn)?;
         }
         use crate::schema::tasks::dsl::*;
-        // postgres_client.execute(
-        //     "UPDATE events SET status = $1 , triggered_at = NOW() WHERE uid = $2",
-        //     &[&EventStatus::Succeeded.to_string(), &event.uid],
-        // )?;
-        // push tasks uid to queue
-        // let event_tasks = postgres_client.query(
-        //     "SELECT uid, path, on_failure FROM tasks WHERE event_uid = $1",
-        //     &[&event.uid],
-        // )?;
 
         let light_tasks: Vec<LightTask> = tasks
             .select(LightTask::as_select())
             .filter(event_uid.eq(event.uid))
             .load(&mut conn)?;
-        // let light_tasks: Vec<LightTask> = event_tasks
-        //     .iter()
-        //     .map(|row| {
-        //         let uid: i32 = row.get("uid");
-        //         let path: String = row.get("path");
-        //         let on_failure: Option<String> = row.get("on_failure");
-        //         LightTask {
-        //             uid,
-        //             path,
-        //             on_failure,
-        //         }
-        //     })
-        //     .collect::<Vec<LightTask>>();
         let _ = push_tasks_to_queue(light_tasks);
     } else {
         use crate::schema::events::dsl::*;
@@ -575,10 +414,6 @@ fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
                 triggered_at.eq(diesel::dsl::now),
             ))
             .execute(&mut conn)?;
-        // postgres_client.execute(
-        // "UPDATE events SET status = $1 , triggered_at = NOW() WHERE uid = $2",
-        // &[&EventStatus::Retrying.to_string(), &event.uid],
-        // )?;
     };
 
     println!("status: {}", output.status);

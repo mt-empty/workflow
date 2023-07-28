@@ -211,7 +211,7 @@ pub fn cli() {
 // }
 
 // fn is_postgres_running() -> bool {
-//     let mut client = create_postgres_client();
+//     let mut client = ();
 //     if let Err(e) = client {
 //         eprintln!("Failed to create a postgres client {}", e);
 //         return false;

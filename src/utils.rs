@@ -3,15 +3,12 @@ use bincode::serialize;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use dotenv::dotenv;
-use postgres::{Client, Error, NoTls};
 use redis::{Commands, RedisResult};
 use std::env;
 
 use crate::{
     engine::{EventStatus, LightTask},
     models::{NewEvent, NewTask},
-    parser::{ParsableEvent, ParsableTask},
-    schema,
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use tracing::info;
@@ -34,20 +31,6 @@ pub fn establish_pg_connection() -> PgConnection {
         .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
 }
 
-pub fn create_postgres_client() -> Result<Client, Error> {
-    dotenv().ok();
-    let postgres_password = env::var("POSTGRES_PASSWORD").expect("POSTGRES_PASSWORD not set");
-    let client = Client::connect(
-        format!(
-            "host=localhost user=postgres password={}",
-            postgres_password
-        )
-        .as_str(),
-        NoTls,
-    )?;
-
-    Ok(client)
-}
 // This only pushes a light version of the task to the queue
 pub fn push_tasks_to_queue(tasks: Vec<LightTask>) -> Result<(), AnyError> {
     let redis_result = create_redis_connection();
@@ -64,37 +47,8 @@ pub fn push_tasks_to_queue(tasks: Vec<LightTask>) -> Result<(), AnyError> {
     Ok(())
 }
 
-// TODO, insert workflow into bd, instead of the two functions bellow
+// TODO, insert workflow into db, instead of the two functions bellow
 pub fn insert_event_into_db(conn: &mut PgConnection, new_event: NewEvent) -> Result<i32, AnyError> {
-    // let client_result = create_postgres_client();
-    // if let Err(e) = client_result {
-    //     eprintln!("Failed to connect to postgres {}", e);
-    //     eprintln!("exiting...");
-    //     std::process::exit(1);
-    // }
-    // let mut client = client_result.unwrap();
-
-    // let event_name = event.name;
-    // let event_description = event.description;
-    // let event_trigger = event.trigger;
-    // use crate::schema::events::dsl::*;
-    // let new_event = crate::models::NewEvent {
-    //     name: &event_name,
-    //     description: &event_description,
-    //     trigger: &event_trigger,
-    // };
-    // let result = client.query_one(
-    //     "INSERT INTO events (name, description, trigger, status) VALUES ($1, $2, $3, $4) RETURNING uid",
-    //     &[
-    //         &event_name,
-    //         &event_description,
-    //         &event_trigger,
-    //         &EventStatus::Created.to_string(),
-    //     ],
-    // )?;
-    // println!("results: {:?}", result);
-    // let event_uid: i32 = result.get("uid");
-    // println!("uid: {:?}", event_uid);
     use crate::schema::events::dsl::*;
     let event_uid = diesel::insert_into(events)
         .values(&new_event)
@@ -106,25 +60,11 @@ pub fn insert_event_into_db(conn: &mut PgConnection, new_event: NewEvent) -> Res
 pub fn insert_event_tasks_into_db(
     conn: &mut PgConnection,
     new_tasks: Vec<NewTask>,
-    event_uid: i32,
 ) -> Result<(), AnyError> {
-    // let client_result: std::result::Result<Client, Error> = create_postgres_client();
-    // if let Err(e) = client_result {
-    //     eprintln!("Failed to connect to postgres {}", e);
-    //     eprintln!("exiting...");
-    //     std::process::exit(1);
-    // }
-    // let mut client = client_result.unwrap();
-
     for new_task in new_tasks {
         diesel::insert_into(crate::schema::tasks::table)
             .values(new_task)
             .execute(conn)?; // TODO: check if this is the correct way to do it
-
-        // client.execute(
-        //     "INSERT INTO tasks (event_uid, name, description, path, on_failure, status) VALUES ($1, $2, $3, $4, $5, $6)",
-        //     &[&event_uid, &task_name, &task_description, &task_path, &task_on_failure, &task_status],
-        // )?;
     }
 
     Ok(())
