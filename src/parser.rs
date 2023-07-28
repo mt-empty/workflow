@@ -80,7 +80,7 @@ pub fn process_yaml_file(yaml_file_path: String) -> Result<(), AnyError> {
             };
             tasks.push(task);
         }
-        insert_event_tasks_into_db(&mut conn, tasks, event_uid)?;
+        insert_event_tasks_into_db(&mut conn, tasks)?;
     }
 
     Ok(())

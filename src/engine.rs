@@ -234,7 +234,7 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
                 });
             }
             None => {
-                println!("No task");
+                println!("No task to process");
             }
         }
 
