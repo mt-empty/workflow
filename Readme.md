@@ -2,7 +2,7 @@
 
 A simple readability oriented event driven workflow engine.
 ## Demo
-![Click to Watch Video](./demo.webm)
+![](./demo.gif)
 
 ## Limitations
 
