@@ -1,6 +1,8 @@
 use anyhow::{Error as AnyError, Result};
 use clap::{Parser, Subcommand};
-use diesel::{PgConnection, QueryDsl, RunQueryDsl, Selectable, SelectableHelper, Table};
+use diesel::{
+    ExpressionMethods, PgConnection, QueryDsl, RunQueryDsl, Selectable, SelectableHelper, Table,
+};
 use prettytable::{row, Cell, Row, Table as PrettyTable};
 use serde_json::Value;
 use std::any::Any;
@@ -46,7 +48,8 @@ enum Commands {
     },
     // Shows the status of a task
     Show {
-        task_name: String,
+        #[clap(subcommand)]
+        subcommand: ShowSubcommands,
     },
     // Pauses the task
     Pause {
@@ -84,13 +87,13 @@ enum ListSubcommands {
 #[derive(Subcommand)]
 enum ShowSubcommands {
     // Lists all tasks
-    Tasks { uid: i32, name: String },
+    Task { uid: i32 },
     // Lists all events
-    Events { uid: i32, name: String },
+    Event { uid: i32 },
     // Lists all workflows
-    Workflows { uid: i32, name: String },
+    Workflow { uid: i32 },
     // Lists all engines
-    Engines { uid: i32, name: String },
+    Engine { uid: i32 },
 }
 
 #[derive(PartialEq)]
@@ -204,9 +207,11 @@ pub fn cli() {
                 std::process::exit(1);
             }
         }
-        Commands::Show { task_name } => {
-            println!("Showing task: {}", task_name);
-            // Add your logic for the 'show' Commands here
+        Commands::Show { subcommand } => {
+            if let Err(e) = process_show_subcommands(subcommand) {
+                println!("Failed to show, {}", e);
+                std::process::exit(1);
+            };
         }
         Commands::Pause { task_name } => {
             println!("Continuing task: {}", task_name);
@@ -221,7 +226,7 @@ pub fn cli() {
             todo!()
         }
         Commands::List { subcommand } => {
-            if let Err(e) = process_list_subcommand(subcommand) {
+            if let Err(e) = process_list_subcommands(subcommand) {
                 println!("Failed to list, {}", e);
                 std::process::exit(1);
             };
@@ -230,11 +235,45 @@ pub fn cli() {
     std::process::exit(0);
 }
 
-fn process_list_subcommand(subcommand: &ListSubcommands) -> Result<(), AnyError> {
+fn process_show_subcommands(subcommand: &ShowSubcommands) -> Result<(), AnyError> {
+    let mut conn = establish_pg_connection();
+    match subcommand {
+        ShowSubcommands::Task { uid } => {
+            println!("Showing task: {}", uid);
+            let item: Task = workflow::schema::tasks::dsl::tasks
+                .select(Task::as_select())
+                .filter(workflow::schema::tasks::dsl::uid.eq(uid))
+                .first::<Task>(&mut conn)?;
+            list_items(vec![item])?
+        }
+        ShowSubcommands::Event { uid } => {
+            println!("Showing event: {}", uid);
+            let item: Event = workflow::schema::events::dsl::events
+                .select(Event::as_select())
+                .filter(workflow::schema::events::dsl::uid.eq(uid))
+                .first::<Event>(&mut conn)?;
+            list_items(vec![item])?
+        }
+        ShowSubcommands::Workflow { uid } => {
+            println!("Showing workflow: {}", uid);
+            todo!()
+        }
+        ShowSubcommands::Engine { uid } => {
+            println!("Showing engine: {}", uid);
+            let item = workflow::schema::engines::dsl::engines
+                .select(Engine::as_select())
+                .filter(workflow::schema::engines::dsl::uid.eq(uid))
+                .first::<Engine>(&mut conn)?;
+            list_items(vec![item])?
+        }
+    }
+    Ok(())
+}
+
+fn process_list_subcommands(subcommand: &ListSubcommands) -> Result<(), AnyError> {
     match subcommand {
         ListSubcommands::Tasks {} => {
             println!("Listing tasks");
-
             let mut conn = establish_pg_connection();
             let items = workflow::schema::tasks::dsl::tasks
                 .select(Task::as_select())
@@ -243,32 +282,30 @@ fn process_list_subcommand(subcommand: &ListSubcommands) -> Result<(), AnyError>
         }
         ListSubcommands::Events {} => {
             println!("Listing events");
-
             let mut conn = establish_pg_connection();
             let items = workflow::schema::events::dsl::events
                 .select(Event::as_select())
                 .load::<Event>(&mut conn)?;
             list_items(items)
         }
+        ListSubcommands::Workflows {} => {
+            println!("Listing workflows, not implemented yet");
+            todo!()
+        }
         ListSubcommands::Engines {} => {
             println!("Listing engines");
-
             let mut conn = establish_pg_connection();
             let items = workflow::schema::engines::dsl::engines
                 .select(Engine::as_select())
                 .load::<Engine>(&mut conn)?;
             list_items(items)
         }
-        ListSubcommands::Workflows {} => {
-            println!("Listing workflows, not implemented yet");
-            todo!()
-        }
         ListSubcommands::All {} => {
             println!("Listing all");
-            process_list_subcommand(&ListSubcommands::Tasks {})?;
-            process_list_subcommand(&ListSubcommands::Events {})?;
-            process_list_subcommand(&ListSubcommands::Engines {})?;
-            process_list_subcommand(&ListSubcommands::Workflows {})
+            process_list_subcommands(&ListSubcommands::Tasks {})?;
+            process_list_subcommands(&ListSubcommands::Events {})?;
+            process_list_subcommands(&ListSubcommands::Workflows {})?;
+            process_list_subcommands(&ListSubcommands::Engines {})
         }
     }
 }
