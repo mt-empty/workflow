@@ -1,12 +1,6 @@
 // use crate::schema::sql_types::EngineStatus;
-use diesel::deserialize::{self, FromSql};
-use diesel::pg::{Pg, PgValue};
 use diesel::prelude::*;
-use diesel::serialize::{self, IsNull, Output, ToSql};
-use diesel::sql_types::Bool;
-use diesel::*;
 use serde_derive::{Deserialize, Serialize};
-use std::io::Write;
 
 use crate::engine::EventStatus;
 

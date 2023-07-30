@@ -15,6 +15,8 @@ use workflow::parser::process_yaml_file;
 use workflow::utils::establish_pg_connection;
 use workflow::utils::run_migrations;
 
+const PRETTY_TABLE_MAX_CELL_LEN: usize = 50;
+
 // #[clap(about = "A tool to command workflow engine", author, version)]
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -306,8 +308,12 @@ fn list_items<T: serde::ser::Serialize>(items: Vec<T>) -> Result<(), AnyError> {
                 .iter()
                 .map(|value| -> String {
                     let mut s = value.to_string();
-                    s.truncate(50);
-                    format!("{}...", s)
+                    if s.len() > PRETTY_TABLE_MAX_CELL_LEN {
+                        s.truncate(PRETTY_TABLE_MAX_CELL_LEN);
+                        format!("{}...", s)
+                    } else {
+                        s
+                    }
                 })
                 .collect(),
         );
