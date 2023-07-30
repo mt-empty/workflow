@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use diesel::{PgConnection, QueryDsl, RunQueryDsl, Selectable, SelectableHelper, Table};
 use prettytable::{row, Cell, Row, Table as PrettyTable};
 use serde_json::Value;
+use std::any::Any;
 use std::fs::File;
 use std::process::Command;
 use std::thread;
@@ -72,12 +73,24 @@ enum ListSubcommands {
     Tasks {},
     // Lists all events
     Events {},
-    // Lists all engines
-    Engines {},
     // Lists all workflows
     Workflows {},
+    // Lists all engines
+    Engines {},
     // Lists all
     All {},
+}
+
+#[derive(Subcommand)]
+enum ShowSubcommands {
+    // Lists all tasks
+    Tasks { uid: i32, name: String },
+    // Lists all events
+    Events { uid: i32, name: String },
+    // Lists all workflows
+    Workflows { uid: i32, name: String },
+    // Lists all engines
+    Engines { uid: i32, name: String },
 }
 
 #[derive(PartialEq)]
@@ -190,7 +203,6 @@ pub fn cli() {
                 println!("Failed to add file, {}", e);
                 std::process::exit(1);
             }
-            // Add your logic for the 'add' Commands here
         }
         Commands::Show { task_name } => {
             println!("Showing task: {}", task_name);
@@ -198,76 +210,68 @@ pub fn cli() {
         }
         Commands::Pause { task_name } => {
             println!("Continuing task: {}", task_name);
-            // Add your logic for the 'continue' Commands here
+            todo!()
         }
         Commands::Continue { task_name } => {
             println!("Continuing task: {}", task_name);
-            // Add your logic for the 'continue' Commands here
+            todo!()
         }
         Commands::Abort { task_name } => {
             println!("Aborting task: {}", task_name);
-            // Add your logic for the 'abort' Commands here
+            todo!()
         }
         Commands::List { subcommand } => {
-            fn process_subcommand(subcommand: &ListSubcommands) {
-                match subcommand {
-                    ListSubcommands::Tasks {} => {
-                        println!("Listing tasks");
-
-                        let mut conn = establish_pg_connection();
-                        let items = workflow::schema::tasks::dsl::tasks
-                            .select(Task::as_select())
-                            .load::<Task>(&mut conn)
-                            .unwrap();
-                        if let Err(e) = list_items(items) {
-                            println!("Failed to add file, {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    ListSubcommands::Events {} => {
-                        println!("Listing events");
-
-                        let mut conn = establish_pg_connection();
-                        let items = workflow::schema::events::dsl::events
-                            .select(Event::as_select())
-                            .load::<Event>(&mut conn)
-                            .unwrap();
-                        if let Err(e) = list_items(items) {
-                            println!("Failed to add file, {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    ListSubcommands::Engines {} => {
-                        println!("Listing engines");
-
-                        let mut conn = establish_pg_connection();
-                        let items = workflow::schema::engines::dsl::engines
-                            .select(Engine::as_select())
-                            .load::<Engine>(&mut conn)
-                            .unwrap();
-                        if let Err(e) = list_items(items) {
-                            println!("Failed to add file, {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    ListSubcommands::Workflows {} => {
-                        println!("Listing workflows");
-                    }
-                    ListSubcommands::All {} => {
-                        println!("Listing all");
-                        process_subcommand(&ListSubcommands::Tasks {});
-                        process_subcommand(&ListSubcommands::Events {});
-                        process_subcommand(&ListSubcommands::Engines {});
-                        process_subcommand(&ListSubcommands::Workflows {});
-                    }
-                }
-            }
-            process_subcommand(subcommand);
+            if let Err(e) = process_list_subcommand(subcommand) {
+                println!("Failed to list, {}", e);
+                std::process::exit(1);
+            };
         }
     }
     std::process::exit(0);
 }
 
+fn process_list_subcommand(subcommand: &ListSubcommands) -> Result<(), AnyError> {
+    match subcommand {
+        ListSubcommands::Tasks {} => {
+            println!("Listing tasks");
+
+            let mut conn = establish_pg_connection();
+            let items = workflow::schema::tasks::dsl::tasks
+                .select(Task::as_select())
+                .load::<Task>(&mut conn)?;
+            list_items(items)
+        }
+        ListSubcommands::Events {} => {
+            println!("Listing events");
+
+            let mut conn = establish_pg_connection();
+            let items = workflow::schema::events::dsl::events
+                .select(Event::as_select())
+                .load::<Event>(&mut conn)?;
+            list_items(items)
+        }
+        ListSubcommands::Engines {} => {
+            println!("Listing engines");
+
+            let mut conn = establish_pg_connection();
+            let items = workflow::schema::engines::dsl::engines
+                .select(Engine::as_select())
+                .load::<Engine>(&mut conn)?;
+            list_items(items)
+        }
+        ListSubcommands::Workflows {} => {
+            println!("Listing workflows, not implemented yet");
+            todo!()
+        }
+        ListSubcommands::All {} => {
+            println!("Listing all");
+            process_list_subcommand(&ListSubcommands::Tasks {})?;
+            process_list_subcommand(&ListSubcommands::Events {})?;
+            process_list_subcommand(&ListSubcommands::Engines {})?;
+            process_list_subcommand(&ListSubcommands::Workflows {})
+        }
+    }
+}
 // fn list<T>(any_table: &T) -> Result<(), diesel::result::Error>
 // where
 //     T: Table,
