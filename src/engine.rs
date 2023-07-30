@@ -69,38 +69,6 @@ impl Display for EngineStatus {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct EngineTask {
-    pub uid: i32,
-    pub event_uid: i32,
-    pub name: String,
-    pub description: String,
-    pub status: String,
-    pub path: String,
-    pub on_failure: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub deleted_at: String,
-    pub completed_at: String,
-}
-
-impl fmt::Display for EngineTask {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        writeln!(f, "\tuid: {}", self.uid)?;
-        writeln!(f, "\tevent_uid: {}", self.event_uid)?;
-        writeln!(f, "\tname: {}", self.name)?;
-        writeln!(f, "\tdescription: {}", self.description)?;
-        writeln!(f, "\tstatus: {}", self.status)?;
-        writeln!(f, "\tpath: {}", self.path)?;
-        writeln!(f, "\ton_failure: {}", self.on_failure)?;
-        writeln!(f, "\tcreated_at: {}", self.created_at)?;
-        writeln!(f, "\tupdated_at: {}", self.updated_at)?;
-        writeln!(f, "\tdeleted_at: {}", self.deleted_at)?;
-        writeln!(f, "\tcompleted_at: {}", self.completed_at)?;
-        Ok(())
-    }
-}
-
 #[derive(Queryable, Selectable, Serialize, Deserialize)]
 #[diesel(table_name = crate::schema::tasks)]
 pub struct LightTask {
@@ -142,6 +110,8 @@ impl fmt::Display for EngineEvent {
     }
 }
 
+const THREAD_COUNT: usize = 4;
+
 fn run_process<F>(process_name: &str, process_fn: F) -> Result<(), AnyError>
 where
     F: FnOnce(Arc<AtomicBool>) -> Result<(), AnyError>,
@@ -171,9 +141,9 @@ pub fn run_task_process() -> Result<(), AnyError> {
 pub fn run_event_process() -> Result<(), AnyError> {
     run_process("Event", poll_events)
 }
-// set engine_uid to 1 by default
-pub fn handle_stop(engine_uid: i32) -> Result<(), AnyError> {
-    diesel::update(schema::engines::dsl::engines.find(engine_uid))
+
+pub fn handle_stop() -> Result<(), AnyError> {
+    diesel::update(schema::engines::table)
         .set(schema::engines::stop_signal.eq(true))
         .execute(&mut establish_pg_connection())?;
     Ok(())
@@ -199,23 +169,10 @@ pub fn create_engine(
 }
 
 fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
-    let thread_pool_result = ThreadPoolBuilder::new().num_threads(4).build();
-    if let Err(e) = thread_pool_result {
-        eprintln!("Failed to create thread pool {}", e);
-        eprintln!("exiting...");
-        std::process::exit(1);
-    }
-    let thread_pool = thread_pool_result.unwrap();
-
-    let redis_result = create_redis_connection();
-    if let Err(e) = redis_result {
-        eprintln!("Failed to connect to redis {}", e);
-        eprintln!("exiting...");
-        std::process::exit(1);
-    }
-    let mut redis_con = redis_result.unwrap();
-
+    let thread_pool = ThreadPoolBuilder::new().num_threads(THREAD_COUNT).build()?;
     let pg_conn = &mut establish_pg_connection();
+    let mut redis_con = create_redis_connection()?;
+
     let engine_uid = create_engine(pg_conn, "first", "0.0.0.0")?;
 
     while running.load(Ordering::SeqCst) {
@@ -229,7 +186,7 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
                     let task: LightTask = deserialize(popped_value.as_bytes()).unwrap();
                     println!("Task: {}", task);
                     if let Err(e) = execute_task(task) {
-                        eprintln!("Failed to execute task {}", e);
+                        println!("Failed to execute task {}", e);
                     };
                 });
             }
@@ -268,7 +225,7 @@ fn queue_processor(running: Arc<AtomicBool>) -> Result<(), AnyError> {
     if !running.load(Ordering::SeqCst) {
         println!("\nCtrl+C signal detected. Exiting...");
     }
-    let updated_results = diesel::update(schema::engines::dsl::engines.find(engine_uid))
+    diesel::update(schema::engines::dsl::engines.find(engine_uid))
         .set((
             schema::engines::stopped_at.eq(diesel::dsl::now),
             schema::engines::status.eq(EngineStatus::Stopped.to_string()),
@@ -335,6 +292,14 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
     use crate::schema::tasks::dsl::*;
     let mut conn = establish_pg_connection();
     // todo , update task status to running
+
+    diesel::update(tasks.find(task.uid))
+        .set((
+            status.eq(TaskStatus::Running.to_string()),
+            updated_at.eq(diesel::dsl::now),
+        ))
+        .execute(&mut conn)?;
+
     let path_basename = match Path::new(&task.path).file_name() {
         Some(basename) => basename,
         None => return Err(AnyError::msg("Failed to get path basename")),
@@ -382,9 +347,8 @@ fn execute_event(event: EngineEvent) -> Result<(), AnyError> {
         Some(basename) => basename,
         None => return Err(AnyError::msg("Failed to get path basename")),
     };
-
     let path_dirname = Path::new(&event.trigger).parent().unwrap();
-    // thread::sleep(Duration::from_millis(5000));
+
     let output = ShellCommand::new("bash")
         .arg(path_basename)
         .current_dir(path_dirname)
