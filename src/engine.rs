@@ -1,25 +1,21 @@
 use crate::models::Engine;
-use crate::schema::*;
 use crate::utils::{self, create_redis_connection, establish_pg_connection, push_tasks_to_queue};
 use crate::{models, schema};
 use anyhow::Error as AnyError;
-use bincode::{deserialize, serialize};
+use bincode::deserialize;
 use ctrlc::set_handler;
 use diesel::sql_types::*;
 use diesel::PgConnection;
-use dotenv::dotenv;
 use rayon::ThreadPoolBuilder;
-use redis::{Commands as RedisCommand, FromRedisValue, RedisResult};
+use redis::{Commands as RedisCommand, FromRedisValue};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
-use std::os::unix::process;
 use std::path::Path;
 use std::process::Command as ShellCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread::sleep;
 use std::time::Duration;
-use std::{env, fmt, str, thread};
+use std::{fmt, str, thread};
 
 enum TaskStatus {
     Pending,
