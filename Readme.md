@@ -100,7 +100,7 @@ LRANGE tasks 0 -1
 - [x] Add cli functionality to 
   - [x] Parse workflow yaml files
   - [x] Add workflow to engine 
-  - [ ] Check the status of engine, event and task processes
+  - [x] Check the status of engine, event and task processes
   - [ ] Control workflows, stop, continue, delete
 - [ ] Make it distributed
   - [ ] Add support for multiple engines
