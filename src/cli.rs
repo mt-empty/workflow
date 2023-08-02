@@ -6,14 +6,16 @@ use serde_json::Value;
 use std::fs::File;
 use std::process::Command;
 use tracing::field;
-use workflow::engine::run_task_process;
-use workflow::engine::{handle_stop, run_event_process};
-use workflow::models::{Engine, Event, Task};
+use workflow::engine::{create_new_engine_entry, handle_stop, run_event_process};
+use workflow::engine::{run_task_process, update_engine_status};
+use workflow::models::{Engine, EngineStatus, Event, Task};
 use workflow::parser::process_yaml_file;
 use workflow::utils::establish_pg_connection;
 use workflow::utils::run_migrations;
 
 const PRETTY_TABLE_MAX_CELL_LEN: usize = 50;
+const ENGINE_NAME: &str = "workflow-engine";
+const ENGINE_IP_ADDRESS: &str = "0.0.0.0";
 
 // #[clap(about = "A tool to command workflow engine", author, version)]
 #[derive(Parser)]
@@ -30,8 +32,12 @@ enum Commands {
     Start {},
     // Stops the engine
     Setup {},
-    StartTaskProcess {},
-    StartEventProcess {},
+    StartTaskProcess {
+        engine_uid: i32,
+    },
+    StartEventProcess {
+        engine_uid: i32,
+    },
     Stop {},
     /// Adds workflow to the queue
     Add {
@@ -101,7 +107,11 @@ fn create_and_clear_log_file(file_path: &str) -> Result<File, AnyError> {
     Ok(file)
 }
 
-fn start_process(subcommand_name: &str, process_type: ProcessType) -> Result<(), AnyError> {
+fn start_process(
+    subcommand_name: &str,
+    process_type: ProcessType,
+    engine_uid: i32,
+) -> Result<(), AnyError> {
     let _ = std::fs::create_dir("./logs");
 
     let stdout_path = match process_type {
@@ -122,6 +132,8 @@ fn start_process(subcommand_name: &str, process_type: ProcessType) -> Result<(),
         .arg("run")
         // .arg("--bin")
         .arg(subcommand_name)
+        .arg("--")
+        .arg(engine_uid.to_string())
         .stdout(stdout)
         .stderr(stderr);
 
@@ -139,46 +151,31 @@ pub fn cli() {
     match &cli.command {
         Commands::Start {} => {
             println!("Starting the Engine");
-
-            if let Err(e) = start_process("setup", ProcessType::Setup) {
-                eprintln!("Failed to start Setup process: {}", e);
+            if let Err(e) = process_start_command() {
+                eprintln!("Failed to start the engine: {}", e);
                 eprintln!("exiting...");
                 std::process::exit(1);
             }
-
-            if let Err(e) = start_process("start-event-process", ProcessType::Event) {
-                eprintln!("Failed to start Event process: {}", e);
-                eprintln!("exiting...");
-                std::process::exit(1);
-            }
-
-            if let Err(e) = start_process("start-task-process", ProcessType::Task) {
-                eprintln!("Failed to start Task process: {}", e);
-                eprintln!("exiting...");
-                std::process::exit(1);
-            }
-
-            println!("Engine started successfully");
         }
         Commands::Setup {} => {
             println!("Setup");
 
             if let Err(e) = run_migrations() {
-                eprintln!("Failed to create initial tables: {}", e);
+                eprintln!("Failed to run DB migrations: {}", e);
                 eprintln!("exiting...");
                 std::process::exit(1);
             }
         }
-        Commands::StartEventProcess {} => {
+        Commands::StartEventProcess { engine_uid } => {
             println!("StartEventProcess");
-            if let Err(e) = run_event_process() {
+            if let Err(e) = run_event_process(*engine_uid) {
                 println!("Failed to start event process, {}", e);
                 std::process::exit(1);
             };
         }
-        Commands::StartTaskProcess {} => {
+        Commands::StartTaskProcess { engine_uid } => {
             println!("StartTaskProcess");
-            if let Err(e) = run_task_process() {
+            if let Err(e) = run_task_process(*engine_uid) {
                 println!("Failed to start task process, {}", e);
                 std::process::exit(1);
             };
@@ -224,6 +221,39 @@ pub fn cli() {
         }
     }
     std::process::exit(0);
+}
+
+fn process_start_command() -> Result<(), AnyError> {
+    // if let Err(e) = start_process("setup", ProcessType::Setup) {
+    //     eprintln!("Failed to start Setup process: {}", e);
+    //     eprintln!("exiting...");
+    //     std::process::exit(1);
+    // }
+
+    if let Err(e) = run_migrations() {
+        eprintln!("Failed to run DB migrations: {}", e);
+        eprintln!("exiting...");
+        std::process::exit(1);
+    }
+    let mut conn = establish_pg_connection();
+    let engine_uid = create_new_engine_entry(&mut conn, ENGINE_NAME, ENGINE_IP_ADDRESS)?;
+
+    if let Err(e) = start_process("start-event-process", ProcessType::Event, engine_uid) {
+        eprintln!("Failed to start Event process: {}", e);
+        eprintln!("exiting...");
+        std::process::exit(1);
+    }
+
+    if let Err(e) = start_process("start-task-process", ProcessType::Task, engine_uid) {
+        eprintln!("Failed to start Task process: {}", e);
+        eprintln!("exiting...");
+        std::process::exit(1);
+    }
+
+    update_engine_status(&mut conn, engine_uid, EngineStatus::Running)?;
+
+    println!("Engine started successfully");
+    Ok(())
 }
 
 fn process_show_subcommands(

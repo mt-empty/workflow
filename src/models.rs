@@ -1,8 +1,8 @@
+use std::fmt::{self, Display, Formatter};
+
 // use crate::schema::sql_types::EngineStatus;
 use diesel::prelude::*;
 use serde_derive::{Deserialize, Serialize};
-
-use crate::engine::EventStatus;
 
 #[derive(Queryable, Selectable, PartialEq, Serialize, Deserialize)]
 #[diesel(table_name = crate::schema::engines)]
@@ -23,6 +23,22 @@ pub struct Engine {
 pub struct NewEngine<'a> {
     pub name: &'a str,
     pub ip_address: &'a str,
+}
+
+pub enum EngineStatus {
+    Starting,
+    Running,
+    Stopped,
+}
+
+impl Display for EngineStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            EngineStatus::Starting => write!(f, "Starting"),
+            EngineStatus::Running => write!(f, "Running"),
+            EngineStatus::Stopped => write!(f, "Stopped"),
+        }
+    }
 }
 
 #[derive(Queryable, Selectable, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,6 +75,42 @@ impl Default for NewEvent<'_> {
             status: EventStatus::Created.to_string(),
             created_at: chrono::Local::now().naive_local(),
         }
+    }
+}
+
+pub enum EventStatus {
+    Created,
+    Succeeded,
+    Retrying,
+}
+
+impl Display for EventStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            EventStatus::Created => write!(f, "Created"),
+            EventStatus::Succeeded => write!(f, "Succeeded"),
+            EventStatus::Retrying => write!(f, "Retrying"),
+        }
+    }
+}
+
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = crate::schema::events)]
+pub struct LightEvent {
+    pub uid: i32,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub trigger: String,
+    pub status: String,
+}
+
+impl fmt::Display for LightEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        writeln!(f, "\tuid: {}", self.uid)?;
+        writeln!(f, "\tname: {:?}", self.name)?;
+        writeln!(f, "\tdescription: {:?}", self.description)?;
+        writeln!(f, "\ttrigger: {}", self.trigger)?;
+        Ok(())
     }
 }
 
@@ -105,5 +157,44 @@ impl Default for NewTask {
             created_at: chrono::Local::now().naive_local(),
             updated_at: chrono::Local::now().naive_local(),
         }
+    }
+}
+
+pub enum TaskStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+impl Display for TaskStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            TaskStatus::Pending => write!(f, "Pending"),
+            TaskStatus::Running => write!(f, "Running"),
+            TaskStatus::Completed => write!(f, "Completed"),
+            TaskStatus::Failed => write!(f, "Failed"),
+        }
+    }
+}
+
+#[derive(Queryable, Selectable, Serialize, Deserialize)]
+#[diesel(table_name = crate::schema::tasks)]
+pub struct LightTask {
+    pub uid: i32,
+    pub path: String,
+    pub on_failure: Option<String>,
+}
+
+impl Display for LightTask {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        writeln!(f, "\tuid: {}", self.uid)?;
+        writeln!(f, "\tpath: {}", self.path)?;
+        writeln!(
+            f,
+            "\ton_failure: {}",
+            self.on_failure.as_ref().unwrap_or(&"None".to_string())
+        )?;
+        Ok(())
     }
 }

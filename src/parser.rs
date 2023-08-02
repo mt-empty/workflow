@@ -1,4 +1,3 @@
-use crate::engine::EventStatus;
 use crate::models::{NewEvent, NewTask};
 use crate::utils::{establish_pg_connection, insert_event_into_db, insert_event_tasks_into_db};
 use anyhow::{Error as AnyError, Ok, Result};

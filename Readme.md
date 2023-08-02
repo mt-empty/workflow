@@ -104,6 +104,7 @@ LRANGE tasks 0 -1
   - [ ] Control workflows, stop, continue, delete
 - [ ] Make it distributed
   - [ ] Add support for multiple engines
+- [ ] LLM integration
 
 ---
 

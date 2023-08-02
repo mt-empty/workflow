@@ -6,10 +6,7 @@ use dotenv::dotenv;
 use redis::{Commands, RedisResult};
 use std::env;
 
-use crate::{
-    engine::{EventStatus, LightTask},
-    models::{NewEvent, NewTask},
-};
+use crate::models::{LightTask, NewEvent, NewTask};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use tracing::info;
 
@@ -28,7 +25,7 @@ pub fn establish_pg_connection() -> PgConnection {
 
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     PgConnection::establish(&database_url)
-        .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
+        .unwrap_or_else(|_| panic!("Error connecting to {}", database_url)) // TODO: handle this error
 }
 
 // This only pushes a light version of the task to the queue
