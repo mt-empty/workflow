@@ -101,10 +101,11 @@ LRANGE tasks 0 -1
   - [x] Parse workflow yaml files
   - [x] Add workflow to engine 
   - [x] Check the status of engine, event and task processes
-  - [ ] Control workflows, stop, continue, delete
+  - [ ] Control workflows, pause, continue, abort , and delete
+- [ ] LLM integration
 - [ ] Make it distributed
   - [ ] Add support for multiple engines
-- [ ] LLM integration
+  - [ ] Automate engine deployment using Ansible
 
 ---
 
