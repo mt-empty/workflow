@@ -101,7 +101,6 @@ enum ProcessType {
 }
 
 fn create_and_clear_log_file(file_path: &str) -> Result<File, AnyError> {
-    let _ = std::fs::create_dir("./logs");
     let file = File::create(file_path)?;
     let _ = std::fs::write(file_path, "");
     Ok(file)
