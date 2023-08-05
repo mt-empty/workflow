@@ -9,17 +9,16 @@ services:
       - workflow
   postgres:
     image: postgres
+    env_file: .envdocker
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: $POSTGRES_PASSWORD
       POSTGRES_DB: postgres
-    ports:
-      - "5432:5432"
     networks:
       - workflow
   engine:
     build: .
-    command: ./workflow start
+    env_file: .envdocker
     depends_on:
       - redis
       - postgres
