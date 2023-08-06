@@ -62,3 +62,4 @@ shortcut-rust-client.code-workspace
 .env
 logs
 *.txt
+.envdocker

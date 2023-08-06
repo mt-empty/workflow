@@ -3,7 +3,7 @@ use bincode::serialize;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use dotenv::dotenv;
-use redis::{Commands, RedisResult};
+use redis::Commands;
 use std::env;
 
 use crate::models::{LightTask, NewEvent, NewTask};
@@ -13,7 +13,7 @@ use tracing::info;
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 pub const QUEUE_NAME: &str = "tasks";
 
-pub fn create_redis_connection() -> RedisResult<redis::Connection> {
+pub fn create_redis_connection() -> Result<redis::Connection, redis::RedisError> {
     dotenv().ok();
     let client = redis::Client::open(env::var("REDIS_URL").expect("Redis url not set"))?;
     let con = client.get_connection()?;

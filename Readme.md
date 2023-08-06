@@ -52,23 +52,35 @@ More examples can be found in `tests/workflows/` directory.
 
 ```bash
 echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> .env
-echo DATABASE_URL=postgres://postgres:$POSTGRES_PASSWORD@localhost:5432/postgres >> .env
-echo "REDIS_URL=redis://localhost" >> .env
+echo DATABASE_URL=postgres://postgres:$POSTGRES_PASSWORD@172.17.0.3:5432/postgres >> .env
+echo "REDIS_URL=redis://172.17.0.2/" >> .env
 ```
 
 Start the containers
 
 ```bash
-chmod +x ./start.sh
-./start.sh
+chmod +x ./start_containers.sh
+./start_containers.sh
 ```
 
 Start the engine
-```
+```bash
 cargo run -- --help
 cargo run start
 cargo run add tests/workflows/weather_checks/workflow.yml
 ```
+
+### Docker compose
+
+```bash
+echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> .envdocker
+echo DATABASE_URL=postgres://postgres:$POSTGRES_PASSWORD@postgres:5432/postgres >> .envdocker
+echo "REDIS_URL=redis://redis/" >> .envdocker
+
+
+docker-compose up -d
+```
+
 
 ### Accessing containers
 
@@ -79,7 +91,7 @@ docker exec -it workflow-postgres psql -U postgres -d postgres
 ```
 
 ```sql
-\dt
+\dt # list tables
 
 SELECT * FROM engines;
 ```

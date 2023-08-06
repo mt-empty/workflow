@@ -1,8 +1,10 @@
 use anyhow::{Error as AnyError, Result};
 use clap::{Parser, Subcommand};
 use diesel::{ExpressionMethods, PgConnection, QueryDsl, RunQueryDsl, SelectableHelper};
+use dotenv::dotenv;
 use prettytable::Table as PrettyTable;
 use serde_json::Value;
+use std::env;
 use std::fs::File;
 use std::process::Command;
 use tracing::field;
@@ -31,7 +33,7 @@ enum Commands {
     // Starts the engine
     Start {},
     // Stops the engine
-    Setup {},
+    Migration {},
     StartTaskProcess {
         engine_uid: i32,
     },
@@ -95,7 +97,6 @@ enum ShowSubcommands {
 
 #[derive(PartialEq)]
 enum ProcessType {
-    Setup,
     Task,
     Event,
 }
@@ -114,33 +115,38 @@ fn start_process(
     let _ = std::fs::create_dir("./logs");
 
     let stdout_path = match process_type {
-        ProcessType::Setup => "./logs/setup_stdout.txt",
         ProcessType::Task => "./logs/task_stdout.txt",
         ProcessType::Event => "./logs/event_stdout.txt",
     };
     let stderr_path = match process_type {
-        ProcessType::Setup => "./logs/setup_stderr.txt",
         ProcessType::Task => "./logs/task_stderr.txt",
         ProcessType::Event => "./logs/event_stderr.txt",
     };
     let stdout = create_and_clear_log_file(stdout_path)?;
     let stderr = create_and_clear_log_file(stderr_path)?;
 
-    let mut binding = Command::new("cargo");
+    dotenv().ok();
+
+    let env_var = env::var("ENVIRONMENT").unwrap_or("dev".to_owned());
+    let is_production = env_var == "prod";
+
+    let mut binding;
+    if is_production {
+        binding = Command::new("./workflow");
+    } else {
+        binding = Command::new("cargo");
+        binding.arg("run");
+        // Add other arguments for development environment if needed
+    }
+
     let command = binding
-        .arg("run")
-        // .arg("--bin")
         .arg(subcommand_name)
         .arg("--")
         .arg(engine_uid.to_string())
         .stdout(stdout)
         .stderr(stderr);
 
-    let mut child = command.spawn()?;
-
-    if process_type == ProcessType::Setup {
-        let _ = child.wait()?;
-    }
+    let mut _child = command.spawn()?;
     Ok(())
 }
 
@@ -156,8 +162,8 @@ pub fn cli() {
                 std::process::exit(1);
             }
         }
-        Commands::Setup {} => {
-            println!("Setup");
+        Commands::Migration {} => {
+            println!("Migration");
 
             if let Err(e) = run_migrations() {
                 eprintln!("Failed to run DB migrations: {}", e);
@@ -223,17 +229,12 @@ pub fn cli() {
 }
 
 fn process_start_command() -> Result<(), AnyError> {
-    // if let Err(e) = start_process("setup", ProcessType::Setup) {
-    //     eprintln!("Failed to start Setup process: {}", e);
-    //     eprintln!("exiting...");
-    //     std::process::exit(1);
-    // }
-
     if let Err(e) = run_migrations() {
         eprintln!("Failed to run DB migrations: {}", e);
         eprintln!("exiting...");
         std::process::exit(1);
     }
+    println!("DB migrations completed successfully");
     let mut conn = establish_pg_connection();
     let engine_uid = create_new_engine_entry(&mut conn, ENGINE_NAME, ENGINE_IP_ADDRESS)?;
 

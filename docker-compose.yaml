@@ -19,6 +19,8 @@ services:
   engine:
     build: .
     env_file: .envdocker
+    environment:
+      ENVIRONMENT: prod
     depends_on:
       - redis
       - postgres
