@@ -107,9 +107,9 @@ LRANGE tasks 0 -1
 ```
 
 ## TODO
-- [x] Test suite
+- [x] Create a test suite
 - [x] Add support for event triggers
-- [x] Add cli functionality to 
+- [ ] Add cli functionality to 
   - [x] Parse workflow yaml files
   - [x] Add workflow to engine 
   - [x] Check the status of engine, event and task processes
@@ -117,7 +117,9 @@ LRANGE tasks 0 -1
 - [ ] LLM integration
 - [ ] Make it distributed
   - [ ] Add support for multiple engines
-  - [ ] Automate engine deployment using Ansible
+    - [x] Add a testing environment with multiple engines using docker compose
+    - [ ] Distribute workflows to engines based on the round robin algorithm
+  - [ ] Automate container deployment using Ansible
 
 ---
 
