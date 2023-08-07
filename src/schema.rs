@@ -9,6 +9,8 @@ diesel::table! {
         stop_signal -> Bool,
         started_at -> Timestamp,
         stopped_at -> Timestamp,
+        task_process_status -> Varchar,
+        event_process_status -> Varchar,
     }
 }
 

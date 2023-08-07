@@ -1,8 +1,9 @@
 use std::fmt::{self, Display, Formatter};
 
-// use crate::schema::sql_types::EngineStatus;
 use diesel::prelude::*;
 use serde_derive::{Deserialize, Serialize};
+
+// TODO: change status to enum
 
 #[derive(Queryable, Selectable, PartialEq, Serialize, Deserialize)]
 #[diesel(table_name = crate::schema::engines)]
@@ -11,10 +12,12 @@ pub struct Engine {
     pub uid: i32,
     pub name: String,
     pub ip_address: String,
-    pub status: String, // TODO: change to enum
+    pub status: String,
     pub stop_signal: bool,
     pub started_at: chrono::NaiveDateTime,
     pub stopped_at: chrono::NaiveDateTime,
+    pub task_process_status: String,
+    pub event_process_status: String,
 }
 
 #[derive(Insertable, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -37,6 +40,20 @@ impl Display for EngineStatus {
             EngineStatus::Starting => write!(f, "Starting"),
             EngineStatus::Running => write!(f, "Running"),
             EngineStatus::Stopped => write!(f, "Stopped"),
+        }
+    }
+}
+
+pub enum ProcessStatus {
+    Running,
+    Stopped,
+}
+
+impl Display for ProcessStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ProcessStatus::Running => write!(f, "Running"),
+            ProcessStatus::Stopped => write!(f, "Stopped"),
         }
     }
 }
