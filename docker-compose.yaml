@@ -1,12 +1,7 @@
-# convert below to docker-compose
-# docker run --name workflow-redis -d redis redis-server --save 60 1 --loglevel warning
-# docker run --name workflow-postgres -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" -p 5432:5432 -d postgres
+# This is used for testing purposes only
+# docker-comose version
+version: "3.8"
 services:
-  redis:
-    image: redis
-    command: redis-server --save 60 1 --loglevel warning
-    networks:
-      - workflow
   postgres:
     image: postgres
     env_file: .envdocker
@@ -15,18 +10,79 @@ services:
       POSTGRES_PASSWORD: $POSTGRES_PASSWORD
       POSTGRES_DB: postgres
     networks:
-      - workflow
-  engine:
+      - postgres_ntw
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+  # 1
+  redis1:
+    image: redis
+    command: redis-server --save 60 1 --loglevel warning
+    networks:
+      - engine1_ntw
+  engine1:
     build: .
     env_file: .envdocker
     environment:
       ENVIRONMENT: prod
     depends_on:
-      - redis
-      - postgres
+      redis1:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     networks:
-      - workflow
+      - postgres_ntw
+      - engine1_ntw
+
+  # 2
+  redis2:
+    image: redis
+    command: redis-server --save 60 1 --loglevel warning
+    networks:
+      - engine2_ntw
+  engine2:
+    build: .
+    env_file: .envdocker
+    environment:
+      ENVIRONMENT: prod
+    depends_on:
+      redis1:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    networks:
+      - postgres_ntw
+      - engine2_ntw
+
+  # 3
+  redis3:
+    image: redis
+    command: redis-server --save 60 1 --loglevel warning
+    networks:
+      - engine3_ntw
+  engine3:
+    build: .
+    env_file: .envdocker
+    environment:
+      ENVIRONMENT: prod
+    depends_on:
+      redis3:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    networks:
+      - postgres_ntw
+      - engine3_ntw
 
 networks:
-  workflow:
+  postgres_ntw:
+    driver: bridge
+  engine1_ntw:
+    driver: bridge
+  engine2_ntw:
+    driver: bridge
+  engine3_ntw:
     driver: bridge
