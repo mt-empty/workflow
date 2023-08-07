@@ -235,8 +235,9 @@ fn process_start_command() -> Result<(), AnyError> {
         std::process::exit(1);
     }
     println!("DB migrations completed successfully");
-    let mut conn = establish_pg_connection();
-    let engine_uid = create_new_engine_entry(&mut conn, ENGINE_NAME, ENGINE_IP_ADDRESS)?;
+    let conn = &mut establish_pg_connection();
+    let engine_uid = create_new_engine_entry(conn, ENGINE_NAME, ENGINE_IP_ADDRESS)?;
+    println!("created new engine entry with uid: {}", engine_uid);
 
     if let Err(e) = start_process("start-event-process", ProcessType::Event, engine_uid) {
         eprintln!("Failed to start Event process: {}", e);
@@ -250,7 +251,7 @@ fn process_start_command() -> Result<(), AnyError> {
         std::process::exit(1);
     }
 
-    update_engine_status(&mut conn, engine_uid, EngineStatus::Running)?;
+    update_engine_status(conn, engine_uid, EngineStatus::Running)?;
 
     println!("Engine started successfully");
     Ok(())

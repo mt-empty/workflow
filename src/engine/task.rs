@@ -1,4 +1,4 @@
-use crate::models::{Engine, EngineStatus, LightTask, TaskStatus};
+use crate::models::{Engine, EngineStatus, LightTask, ProcessStatus, TaskStatus};
 use crate::utils::{self, create_redis_connection, establish_pg_connection};
 use anyhow::Error as AnyError;
 use bincode::deserialize;
@@ -20,6 +20,12 @@ pub fn queue_processor(running: Arc<AtomicBool>, engine_uid: i32) -> Result<(), 
     let mut redis_con = create_redis_connection()?;
 
     use crate::schema::engines::dsl::*;
+
+    diesel::update(engines)
+        .filter(uid.eq(engine_uid))
+        .set(task_process_status.eq(ProcessStatus::Running.to_string()))
+        .execute(pg_conn)?;
+
     while running.load(Ordering::SeqCst) {
         let task: Option<redis::Value> = redis_con.lpop(utils::QUEUE_NAME, Default::default())?;
         match task {
@@ -69,13 +75,11 @@ pub fn queue_processor(running: Arc<AtomicBool>, engine_uid: i32) -> Result<(), 
     if !running.load(Ordering::SeqCst) {
         println!("\nCtrl+C signal detected. Exiting...");
     }
-    diesel::update(engines.find(engine_uid))
-        .set((
-            stopped_at.eq(diesel::dsl::now),
-            status.eq(EngineStatus::Stopped.to_string()),
-        ))
-        .get_result::<Engine>(pg_conn)?;
 
+    diesel::update(engines)
+        .filter(uid.eq(engine_uid))
+        .set(task_process_status.eq(ProcessStatus::Stopped.to_string()))
+        .execute(pg_conn)?;
     Ok(())
 }
 
@@ -83,7 +87,7 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
     println!("Task Executor");
 
     use crate::schema::tasks::dsl::*;
-    let mut conn = establish_pg_connection();
+    let conn = &mut establish_pg_connection();
     // todo , update task status to running
 
     diesel::update(tasks.find(task.uid))
@@ -91,7 +95,7 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
             status.eq(TaskStatus::Running.to_string()),
             updated_at.eq(diesel::dsl::now),
         ))
-        .execute(&mut conn)?;
+        .execute(conn)?;
 
     let path_basename = match Path::new(&task.path).file_name() {
         Some(basename) => basename,
@@ -112,7 +116,7 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
                 updated_at.eq(diesel::dsl::now),
                 completed_at.eq(diesel::dsl::now),
             ))
-            .execute(&mut conn)?;
+            .execute(conn)?;
 
         // TODO run on failure
     } else {
@@ -121,7 +125,7 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
                 status.eq(TaskStatus::Failed.to_string()),
                 updated_at.eq(diesel::dsl::now),
             ))
-            .execute(&mut conn)?;
+            .execute(conn)?;
     }
 
     println!("status: {}", output.status);
