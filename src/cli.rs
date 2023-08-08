@@ -1,7 +1,8 @@
-use anyhow::{Error as AnyError, Result};
+use anyhow::{anyhow, Error as AnyError, Result};
 use clap::{Parser, Subcommand};
 use diesel::{ExpressionMethods, PgConnection, QueryDsl, RunQueryDsl, SelectableHelper};
 use dotenv::dotenv;
+use pnet::datalink::interfaces;
 use prettytable::Table as PrettyTable;
 use serde_json::Value;
 use std::env;
@@ -228,7 +229,24 @@ pub fn cli() {
     std::process::exit(0);
 }
 
+fn get_system_ip_address() -> Result<String, AnyError> {
+    // Get a vector with all network interfaces found
+    let all_interfaces = interfaces();
+
+    // Search for the default interface - the one that is
+    // up, not loopback and has an IP.
+    let default_interface = all_interfaces
+        .iter()
+        .find(|e| e.is_up() && !e.is_loopback() && !e.ips.is_empty());
+
+    match default_interface {
+        Some(interface) => Ok(interface.ips[0].ip().to_string()),
+        None => Err(anyhow!("No default interface found")),
+    }
+}
+
 fn process_start_command() -> Result<(), AnyError> {
+    use dotenv::dotenv;
     if let Err(e) = run_migrations() {
         eprintln!("Failed to run DB migrations: {}", e);
         eprintln!("exiting...");
@@ -236,7 +254,12 @@ fn process_start_command() -> Result<(), AnyError> {
     }
     println!("DB migrations completed successfully");
     let conn = &mut establish_pg_connection();
-    let engine_uid = create_new_engine_entry(conn, ENGINE_NAME, ENGINE_IP_ADDRESS)?;
+
+    let engine_uid = create_new_engine_entry(
+        conn,
+        &env::var("ENGINE_NAME").unwrap_or(ENGINE_NAME.to_owned()),
+        &get_system_ip_address()?,
+    )?;
     println!("created new engine entry with uid: {}", engine_uid);
 
     if let Err(e) = start_process("start-event-process", ProcessType::Event, engine_uid) {

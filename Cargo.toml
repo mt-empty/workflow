@@ -24,3 +24,4 @@ diesel = { version = "2.1.0", features = ["chrono", "postgres"] }
 diesel_migrations = { version = "2.1.0", features = ["postgres"] }
 tracing = "0.1.37"
 prettytable-rs = "^0.10.0"
+pnet = "0.34.0"
