@@ -118,8 +118,11 @@ LRANGE tasks 0 -1
 - [ ] Make it distributed
   - [ ] Add support for multiple engines
     - [x] Add a testing environment with multiple engines using docker compose
+    - [ ] On adding workflow, copy workflow yaml file and associated scripts to the engine container, or find a more elegant solution
     - [ ] Distribute workflows to engines based on the round robin algorithm
-  - [ ] Automate container deployment using Ansible
+  - [ ] Automate container deployment using
+    - [ ] Kubernetes
+    - [ ] Ansible
 
 ---
 
