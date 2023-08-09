@@ -24,6 +24,8 @@ diesel::table! {
         created_at -> Timestamp,
         triggered_at -> Nullable<Timestamp>,
         deleted_at -> Nullable<Timestamp>,
+        stdout -> Nullable<Text>,
+        stderr -> Nullable<Text>,
     }
 }
 
@@ -40,6 +42,8 @@ diesel::table! {
         updated_at -> Timestamp,
         deleted_at -> Nullable<Timestamp>,
         completed_at -> Nullable<Timestamp>,
+        stdout -> Nullable<Text>,
+        stderr -> Nullable<Text>,
     }
 }
 

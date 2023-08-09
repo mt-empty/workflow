@@ -91,22 +91,21 @@ fn execute_event(event: LightEvent) -> Result<(), AnyError> {
         .expect("failed to execute process");
 
     // if shell command return 0, then the event was triggered successfully
+    use crate::schema::events::dsl::*;
     if output.status.code().unwrap() == 0 {
-        {
-            use crate::schema::events::dsl::*;
-            diesel::update(events.find(event.uid))
-                .set(status.eq(EventStatus::Succeeded.to_string()))
-                .execute(conn)?;
-        }
-        use crate::schema::tasks::dsl::*;
+        diesel::update(events.find(event.uid))
+            .set(status.eq(EventStatus::Succeeded.to_string()))
+            .execute(conn)?;
 
-        let light_tasks: Vec<LightTask> = tasks
-            .select(LightTask::as_select())
-            .filter(event_uid.eq(event.uid))
-            .load(conn)?;
-        let _ = push_tasks_to_queue(light_tasks);
+        {
+            use crate::schema::tasks::dsl::*;
+            let light_tasks: Vec<LightTask> = tasks
+                .select(LightTask::as_select())
+                .filter(event_uid.eq(event.uid))
+                .load(conn)?;
+            let _ = push_tasks_to_queue(light_tasks);
+        }
     } else {
-        use crate::schema::events::dsl::*;
         diesel::update(events.find(event.uid))
             .set((
                 status.eq(EventStatus::Retrying.to_string()),
@@ -115,9 +114,21 @@ fn execute_event(event: LightEvent) -> Result<(), AnyError> {
             .execute(conn)?;
     };
 
-    println!("status: {}", output.status);
-    // TODO: write to disk
+    diesel::update(schema::events::dsl::events.find(event.uid))
+        .set((
+            stdout.eq(str::from_utf8(&output.stdout)?),
+            stderr.eq(str::from_utf8(&output.stderr)?),
+        ))
+        .execute(conn)?;
+
+    println!(
+        "event id: {} , trigger: {}\nFinished executing with a status: {}",
+        event.uid, event.trigger, output.status
+    );
+    println!("##############################################");
     println!("stdout: {}", str::from_utf8(&output.stdout)?);
+    println!("----------------------------------------------");
     println!("stderr: {}", str::from_utf8(&output.stderr)?);
+    println!("##############################################");
     Ok(())
 }

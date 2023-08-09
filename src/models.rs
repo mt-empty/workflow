@@ -70,6 +70,8 @@ pub struct Event {
     pub created_at: chrono::NaiveDateTime,
     pub triggered_at: Option<chrono::NaiveDateTime>,
     pub deleted_at: Option<chrono::NaiveDateTime>,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
 }
 
 #[derive(Insertable, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -95,6 +97,23 @@ impl Default for NewEvent<'_> {
     }
 }
 
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = crate::schema::events)]
+pub struct LightEvent {
+    pub uid: i32,
+    pub trigger: String,
+    pub status: String,
+}
+
+impl fmt::Display for LightEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        writeln!(f, "\tuid: {}", self.uid)?;
+        writeln!(f, "\ttrigger: {}", self.trigger)?;
+        writeln!(f, "\tstatus: {}", self.status)?;
+        Ok(())
+    }
+}
+
 pub enum EventStatus {
     Created,
     Succeeded,
@@ -108,26 +127,6 @@ impl Display for EventStatus {
             EventStatus::Succeeded => write!(f, "Succeeded"),
             EventStatus::Retrying => write!(f, "Retrying"),
         }
-    }
-}
-
-#[derive(Queryable, Selectable)]
-#[diesel(table_name = crate::schema::events)]
-pub struct LightEvent {
-    pub uid: i32,
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub trigger: String,
-    pub status: String,
-}
-
-impl fmt::Display for LightEvent {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        writeln!(f, "\tuid: {}", self.uid)?;
-        writeln!(f, "\tname: {:?}", self.name)?;
-        writeln!(f, "\tdescription: {:?}", self.description)?;
-        writeln!(f, "\ttrigger: {}", self.trigger)?;
-        Ok(())
     }
 }
 
@@ -146,6 +145,8 @@ pub struct Task {
     pub updated_at: chrono::NaiveDateTime,
     pub deleted_at: Option<chrono::NaiveDateTime>,
     pub completed_at: Option<chrono::NaiveDateTime>,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
 }
 
 #[derive(Insertable, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -177,24 +178,6 @@ impl Default for NewTask {
     }
 }
 
-pub enum TaskStatus {
-    Pending,
-    Running,
-    Completed,
-    Failed,
-}
-
-impl Display for TaskStatus {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            TaskStatus::Pending => write!(f, "Pending"),
-            TaskStatus::Running => write!(f, "Running"),
-            TaskStatus::Completed => write!(f, "Completed"),
-            TaskStatus::Failed => write!(f, "Failed"),
-        }
-    }
-}
-
 #[derive(Queryable, Selectable, Serialize, Deserialize)]
 #[diesel(table_name = crate::schema::tasks)]
 pub struct LightTask {
@@ -213,5 +196,23 @@ impl Display for LightTask {
             self.on_failure.as_ref().unwrap_or(&"None".to_string())
         )?;
         Ok(())
+    }
+}
+
+pub enum TaskStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+impl Display for TaskStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            TaskStatus::Pending => write!(f, "Pending"),
+            TaskStatus::Running => write!(f, "Running"),
+            TaskStatus::Completed => write!(f, "Completed"),
+            TaskStatus::Failed => write!(f, "Failed"),
+        }
     }
 }

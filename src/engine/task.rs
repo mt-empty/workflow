@@ -128,9 +128,22 @@ fn execute_task(task: LightTask) -> Result<(), AnyError> {
             .execute(conn)?;
     }
 
-    println!("status: {}", output.status);
-    // TODO: write to disk
+    // Write stdout and stderr to the database
+    diesel::update(tasks.find(task.uid))
+        .set((
+            stdout.eq(str::from_utf8(&output.stdout)?),
+            stderr.eq(str::from_utf8(&output.stderr)?),
+        ))
+        .execute(conn)?;
+
+    println!(
+        "task id: {} , path: {}\nFinished executing with a status: {}",
+        task.uid, task.path, output.status
+    );
+    println!("##############################################");
     println!("stdout: {}", str::from_utf8(&output.stdout)?);
+    println!("----------------------------------------------");
     println!("stderr: {}", str::from_utf8(&output.stderr)?);
+    println!("##############################################");
     Ok(())
 }
