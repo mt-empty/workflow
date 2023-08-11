@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use diesel::{ExpressionMethods, PgConnection, QueryDsl, RunQueryDsl, SelectableHelper};
 use dotenv::dotenv;
 use pnet::datalink::interfaces;
-use prettytable::Table as PrettyTable;
+use prettytable::{Cell, Row, Table as PrettyTable};
 use serde_json::Value;
 use std::env;
 use std::fs::File;
@@ -379,7 +379,12 @@ fn list_items<T: serde::ser::Serialize>(items: Vec<T>) -> Result<(), AnyError> {
         .collect();
 
     // Add the table headers
-    pretty_table.add_row(fields.iter().map(|field| field.to_string()).collect());
+    pretty_table.add_row(Row::new(
+        fields
+            .iter()
+            .map(|field| Cell::new(field).style_spec("Fg"))
+            .collect(),
+    ));
 
     // Add each item to the table
     for item in items {
