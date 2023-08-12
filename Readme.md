@@ -108,21 +108,23 @@ LRANGE tasks 0 -1
 
 ## TODO
 - [x] Create a test suite
+- [x] Add support for tasks
 - [x] Add support for event triggers
-- [ ] Add cli functionality to 
+- [ ] Add CLI functionality to
   - [x] Parse workflow yaml files
   - [x] Add workflow to engine 
   - [x] Check the status of engine, event and task processes
   - [ ] Control workflows, pause, continue, abort , and delete
-- [ ] LLM integration
 - [ ] Make it distributed
   - [ ] Add support for multiple engines
     - [x] Add a testing environment with multiple engines using docker compose
-    - [ ] On adding workflow, copy workflow yaml file and associated scripts to the engine container, or find a more elegant solution
-    - [ ] Distribute workflows to engines based on the round robin algorithm
+    - [ ] On adding workflow, bundle workflow yaml file and associated scripts into a single self-contained executable
+    - [ ] Implement FTP or gRPC to send the self executable to engine node
+    - [ ] Implement round robin algorithm for distributing workflows to engines 
   - [ ] Automate container deployment using
     - [ ] Kubernetes
     - [ ] Ansible
+- [ ] LLM integration
 
 ---
 
