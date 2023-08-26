@@ -9,8 +9,7 @@ use std::env;
 use std::fs::File;
 use std::process::Command;
 use tracing::field;
-use workflow::engine::{create_new_engine_entry, handle_stop, run_event_process};
-use workflow::engine::{run_task_process, update_engine_status};
+use workflow::engine_utils::{create_new_engine_entry, handle_stop, update_engine_status};
 use workflow::models::{Engine, EngineStatus, Event, Task};
 use workflow::parser::process_yaml_file;
 use workflow::utils::establish_pg_connection;
@@ -109,7 +108,7 @@ fn create_and_clear_log_file(file_path: &str) -> Result<File, AnyError> {
 }
 
 fn start_process(
-    subcommand_name: &str,
+    binary_name: &str,
     process_type: ProcessType,
     engine_uid: i32,
 ) -> Result<(), AnyError> {
@@ -141,8 +140,8 @@ fn start_process(
     }
 
     let command = binding
-        .arg(subcommand_name)
-        .arg("--")
+        .arg("--bin")
+        .arg(binary_name)
         .arg(engine_uid.to_string())
         .stdout(stdout)
         .stderr(stderr);
@@ -174,17 +173,17 @@ pub fn cli() {
         }
         Commands::StartEventProcess { engine_uid } => {
             println!("StartEventProcess");
-            if let Err(e) = run_event_process(*engine_uid) {
-                println!("Failed to start event process, {}", e);
-                std::process::exit(1);
-            };
+            // if let Err(e) = run_event_process(*engine_uid) {
+            //     println!("Failed to start event process, {}", e);
+            //     std::process::exit(1);
+            // };
         }
         Commands::StartTaskProcess { engine_uid } => {
             println!("StartTaskProcess");
-            if let Err(e) = run_task_process(*engine_uid) {
-                println!("Failed to start task process, {}", e);
-                std::process::exit(1);
-            };
+            // if let Err(e) = run_task_process(*engine_uid) {
+            //     println!("Failed to start task process, {}", e);
+            //     std::process::exit(1);
+            // };
         }
         Commands::Stop {} => {
             println!("Stopping the engine");
@@ -262,13 +261,13 @@ fn process_start_command() -> Result<(), AnyError> {
     )?;
     println!("created new engine entry with uid: {}", engine_uid);
 
-    if let Err(e) = start_process("start-event-process", ProcessType::Event, engine_uid) {
+    if let Err(e) = start_process("event", ProcessType::Event, engine_uid) {
         eprintln!("Failed to start Event process: {}", e);
         eprintln!("exiting...");
         std::process::exit(1);
     }
 
-    if let Err(e) = start_process("start-task-process", ProcessType::Task, engine_uid) {
+    if let Err(e) = start_process("task", ProcessType::Task, engine_uid) {
         eprintln!("Failed to start Task process: {}", e);
         eprintln!("exiting...");
         std::process::exit(1);
@@ -413,6 +412,11 @@ fn list_items<T: serde::ser::Serialize>(items: Vec<T>) -> Result<(), AnyError> {
     }
 
     pretty_table.printstd();
+    Ok(())
+}
+
+fn main() -> Result<(), AnyError> {
+    cli();
     Ok(())
 }
 
