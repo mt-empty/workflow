@@ -118,8 +118,8 @@ LRANGE tasks 0 -1
 - [ ] Make it distributed
   - [ ] Add support for multiple engines
     - [x] Add a testing environment with multiple engines using docker compose
-    - [ ] On adding workflow, bundle workflow yaml file and associated scripts into a single self-contained executable
-    - [ ] Implement FTP or gRPC to send the self executable to engine node
+    - [ ] Create a network attached storage for sharing workflow files
+    - [ ] Implement gRPC to stream output of tasks and events
     - [ ] Implement round robin algorithm for distributing workflows to engines 
   - [ ] Automate container deployment using
     - [ ] Kubernetes
