@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Error as AnyError, Result};
+use anyhow::{anyhow, Error as AnyError, Ok, Result};
 use clap::{Parser, Subcommand};
 use diesel::{ExpressionMethods, PgConnection, QueryDsl, RunQueryDsl, SelectableHelper};
 use dotenv::dotenv;
@@ -39,6 +39,10 @@ enum Commands {
     },
     StartEventProcess {
         engine_uid: i32,
+    },
+    Logs {
+        #[clap(subcommand)]
+        subcommand: LogsSubcommands,
     },
     Stop {},
     /// Adds workflow to the queue
@@ -93,6 +97,16 @@ enum ShowSubcommands {
     Workflow { uid: i32 },
     // Lists all engines
     Engine { uid: i32 },
+}
+
+#[derive(Subcommand)]
+enum LogsSubcommands {
+    // Lists all tasks
+    Task { uid: i32 },
+    // Lists all events
+    Event { uid: i32 },
+    // Lists all engines
+    // Engine { uid: i32 },
 }
 
 #[derive(PartialEq)]
@@ -150,7 +164,7 @@ fn start_process(
     Ok(())
 }
 
-pub fn cli() {
+pub async fn cli() {
     let cli = Cli::parse();
 
     match &cli.command {
@@ -184,6 +198,13 @@ pub fn cli() {
             //     println!("Failed to start task process, {}", e);
             //     std::process::exit(1);
             // };
+        }
+        Commands::Logs { subcommand } => {
+            println!("Logs");
+            if let Err(e) = process_log_command(subcommand).await {
+                println!("Failed to stop the engine, {}", e);
+                std::process::exit(1);
+            };
         }
         Commands::Stop {} => {
             println!("Stopping the engine");
@@ -226,6 +247,36 @@ pub fn cli() {
         }
     }
     std::process::exit(0);
+}
+
+async fn process_log_command(subcommand: &LogsSubcommands) -> Result<(), AnyError> {
+    match subcommand {
+        LogsSubcommands::Task { uid } => show_log(uid.to_string()).await?,
+        LogsSubcommands::Event { uid } => show_log(uid.to_string()).await?,
+    };
+    Ok(())
+}
+pub mod grpc {
+    tonic::include_proto!("grpc");
+}
+use grpc::output_streaming_client::OutputStreamingClient;
+use grpc::{OutputChunk, Response as GrpcResponse};
+
+use std::error::Error;
+use tonic::transport::Channel;
+
+async fn show_log(server_id: String) -> Result<(), AnyError> {
+    let mut client = OutputStreamingClient::connect("http://[::1]:10000").await?;
+
+    let mut stream = client
+        .stream_output(OutputChunk::default())
+        .await?
+        .into_inner();
+
+    while let Some(log_message) = stream.message().await? {
+        println!("NOTE = {:?}", log_message);
+    }
+    Ok(())
 }
 
 fn get_system_ip_address() -> Result<String, AnyError> {
@@ -415,8 +466,10 @@ fn list_items<T: serde::ser::Serialize>(items: Vec<T>) -> Result<(), AnyError> {
     Ok(())
 }
 
-fn main() -> Result<(), AnyError> {
-    cli();
+#[tokio::main]
+
+async fn main() -> Result<(), AnyError> {
+    cli().await;
     Ok(())
 }
 

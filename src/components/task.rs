@@ -267,7 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let stream = OutputStreamer {
         features: Arc::new(vec![GrpcResponse {
-            message: "Hello".into(),
+            message: "Hello from task".into(),
         }]),
     };
 
