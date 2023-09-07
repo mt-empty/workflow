@@ -1,17 +1,17 @@
 use anyhow::Error as AnyError;
+use ctrlc::set_handler;
 use diesel::prelude::*;
 use std::path::Path;
-use std::process::Command as ShellCommand;
+use std::process::{Command as ShellCommand, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{env, str, thread};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::mpsc;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, DuplexStream};
+use tokio::sync::{mpsc, RwLock};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tonic::transport::Server;
 use tonic::{Request, Response, Status, Streaming};
-use workflow::engine_utils::run_process;
 use workflow::models::{EventStatus, LightEvent, LightTask, ProcessStatus};
 use workflow::schema;
 use workflow::utils::{establish_pg_connection, push_tasks_to_queue};
@@ -25,25 +25,39 @@ use grpc::{OutputChunk, Response as GrpcResponse};
 #[derive(Debug)]
 pub struct OutputStreamer {
     // an stdout pipe steam
-    features: Arc<Vec<GrpcResponse>>,
+    read_pipe: tokio::io::ReadHalf<tokio::io::DuplexStream>,
 }
 
 #[tonic::async_trait]
 impl OutputStreaming for OutputStreamer {
     type StreamOutputStream = ReceiverStream<Result<GrpcResponse, Status>>;
-
     async fn stream_output(
-        &self,
+        &self, // Make self mutable here
         request: Request<OutputChunk>,
     ) -> Result<Response<Self::StreamOutputStream>, Status> {
         let (mut tx, rx) = mpsc::channel(4);
-        let features = self.features.clone();
-
-        // Spawn an async task to send the output data to the client
-
+        let pipe = &self.read_pipe;
         tokio::spawn(async move {
-            for feature in &features[..] {
-                tx.send(Ok(feature.clone())).await.unwrap();
+            let mut buf = String::new();
+            loop {
+                let n = pipe.read_to_string(&mut buf).await;
+                match n {
+                    Ok(n) => {
+                        if n == 0 {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        println!("Error reading from pipe: {}", e);
+                        break;
+                    }
+                };
+                tx.send(Ok(GrpcResponse {
+                    message: buf.clone(),
+                }))
+                .await
+                .unwrap();
+                buf.clear();
             }
         });
 
@@ -51,12 +65,15 @@ impl OutputStreaming for OutputStreamer {
     }
 }
 
-pub fn poll_events(running: Arc<AtomicBool>, engine_uid: i32) -> Result<(), AnyError> {
+pub fn poll_events(
+    running: Arc<AtomicBool>,
+    engine_uid: i32,
+    stdout_write: &mut DuplexStream,
+) -> Result<(), AnyError> {
     let mut event_uids: Vec<i32> = Vec::new();
     let pg_conn = &mut establish_pg_connection();
 
     use workflow::schema::engines::dsl::*;
-
     diesel::update(engines)
         .filter(uid.eq(engine_uid))
         .set(event_process_status.eq(ProcessStatus::Running.to_string()))
@@ -70,12 +87,14 @@ pub fn poll_events(running: Arc<AtomicBool>, engine_uid: i32) -> Result<(), AnyE
 
         for event in events {
             println!("Event: {}", event);
+            stdout_write.write_all(event.trigger.as_bytes());
             // async execute_event
             let _ = execute_event(event);
         }
 
         if event_uids.is_empty() {
             println!("No events to process");
+            stdout_write.write_all(b"No events to process");
             thread::sleep(Duration::from_millis(2000));
         }
 
@@ -88,15 +107,19 @@ pub fn poll_events(running: Arc<AtomicBool>, engine_uid: i32) -> Result<(), AnyE
             Ok(Some(signal_on)) => {
                 if signal_on {
                     println!("Received stop signal");
+                    stdout_write.write_all(b"Received stop signal");
                     break;
                 }
             }
             Ok(None) => {
                 println!("No stop signal");
+                stdout_write.write_all(b"No stop signal");
             }
             Err(e) => {
                 eprintln!("Failed to query engine status {}", e);
                 eprintln!("exiting...");
+                stdout_write.write_all(format!("Failed to query engine status {}", e).as_bytes());
+                stdout_write.write_all(b"exiting...");
                 std::process::exit(1);
             }
         }
@@ -174,8 +197,35 @@ fn execute_event(event: LightEvent) -> Result<(), AnyError> {
     Ok(())
 }
 
-pub fn run_event_process(engine_uid: i32) -> Result<(), AnyError> {
-    run_process("Event", poll_events, engine_uid)
+pub fn run_process<F>(
+    process_name: &str,
+    process_fn: F,
+    engine_uid: i32,
+    stdout_pipe: &mut DuplexStream,
+) -> Result<(), AnyError>
+where
+    F: FnOnce(Arc<AtomicBool>, i32, &mut DuplexStream) -> Result<(), AnyError>,
+{
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+
+    set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    if let Err(e) = process_fn(running, engine_uid, stdout_pipe) {
+        eprintln!("Failed to start {} process: {}", process_name, e);
+        eprintln!("exiting...");
+        std::process::exit(1);
+    }
+    println!("{} process stopped correctly", process_name);
+
+    Ok(())
+}
+
+pub fn run_event_process(engine_uid: i32, stdout_pipe: &mut DuplexStream) -> Result<(), AnyError> {
+    run_process("Event", poll_events, engine_uid, stdout_pipe)
 }
 
 #[tokio::main]
@@ -186,8 +236,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine_uid = args[1].parse::<i32>().unwrap();
     println!("engine_uid: {}", engine_uid);
 
+    // let stdout_pipe: Arc<RwLock<Stdio>> = Arc::new(RwLock::new(Stdio::piped()));
+    // let stdout_pipe = Stdio::piped();
+    let (stdout_read, mut stdout_write) = tokio::io::duplex(1024);
+
+    // let (read, write) = tokio::io::duplex(1024);
+    let (read_rx, _) = tokio::io::split(stdout_read);
+    // let (mut write_rx, mut read_tx) = tokio::io::split(stdout_write);
+
     tokio::spawn(async move {
-        if let Err(e) = run_event_process(engine_uid) {
+        if let Err(e) = run_event_process(engine_uid, &mut stdout_write) {
             println!("Failed to start event process, {}", e);
             std::process::exit(1);
         };
@@ -195,11 +253,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let addr = "[::1]:10001".parse().unwrap();
 
-    let stream = OutputStreamer {
-        features: Arc::new(vec![GrpcResponse {
-            message: "Hello from event".into(),
-        }]),
-    };
+    let stream = OutputStreamer { read_pipe: read_rx };
 
     let svc = OutputStreamingServer::new(stream);
 
