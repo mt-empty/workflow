@@ -15,6 +15,14 @@ use workflow::parser::process_yaml_file;
 use workflow::utils::establish_pg_connection;
 use workflow::utils::run_migrations;
 
+pub mod grpc {
+    tonic::include_proto!("grpc");
+}
+use grpc::output_streaming_client::OutputStreamingClient;
+use grpc::{OutputChunk, Response as GrpcResponse};
+
+use tonic::transport::Channel;
+
 const PRETTY_TABLE_MAX_CELL_LEN: usize = 50;
 const ENGINE_NAME: &str = "workflow-engine";
 const ENGINE_IP_ADDRESS: &str = "0.0.0.0";
@@ -40,6 +48,7 @@ enum Commands {
     StartEventProcess {
         engine_uid: i32,
     },
+    // show logs for event or task process
     Logs {
         #[clap(subcommand)]
         subcommand: LogsSubcommands,
@@ -102,9 +111,9 @@ enum ShowSubcommands {
 #[derive(Subcommand)]
 enum LogsSubcommands {
     // Lists all tasks
-    Task { uid: i32 },
+    Task,
     // Lists all events
-    Event { uid: i32 },
+    Event,
     // Lists all engines
     // Engine { uid: i32 },
 }
@@ -251,22 +260,15 @@ pub async fn cli() {
 
 async fn process_log_command(subcommand: &LogsSubcommands) -> Result<(), AnyError> {
     match subcommand {
-        LogsSubcommands::Task { uid } => show_log(uid.to_string()).await?,
-        LogsSubcommands::Event { uid } => show_log(uid.to_string()).await?,
+        LogsSubcommands::Task => show_log("10000".to_owned()).await?,
+        LogsSubcommands::Event => show_log("10001".to_owned()).await?,
     };
     Ok(())
 }
-pub mod grpc {
-    tonic::include_proto!("grpc");
-}
-use grpc::output_streaming_client::OutputStreamingClient;
-use grpc::{OutputChunk, Response as GrpcResponse};
 
-use std::error::Error;
-use tonic::transport::Channel;
-
-async fn show_log(server_id: String) -> Result<(), AnyError> {
-    let mut client = OutputStreamingClient::connect("http://[::1]:10000").await?;
+async fn show_log(server_port: String) -> Result<(), AnyError> {
+    let mut client =
+        OutputStreamingClient::connect(format!("http://[::1]:{}", server_port)).await?;
 
     let mut stream = client
         .stream_output(OutputChunk::default())

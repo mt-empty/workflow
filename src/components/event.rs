@@ -4,18 +4,22 @@ use diesel::prelude::*;
 use std::path::Path;
 use std::process::{Command as ShellCommand, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::mpsc::Sender;
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::time::Duration;
 use std::{env, str, thread};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, DuplexStream};
-use tokio::sync::{mpsc, RwLock};
+// use tokio::net::unix::pipe::Sender;
+use tokio::sync::mpsc as tokio_mpsc;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tonic::transport::Server;
 use tonic::{Request, Response, Status, Streaming};
+use tracing::{event, span, Level};
+use tracing_subscriber::FmtSubscriber;
 use workflow::models::{EventStatus, LightEvent, LightTask, ProcessStatus};
 use workflow::schema;
 use workflow::utils::{establish_pg_connection, push_tasks_to_queue};
-
 pub mod grpc {
     tonic::include_proto!("grpc");
 }
@@ -25,7 +29,7 @@ use grpc::{OutputChunk, Response as GrpcResponse};
 #[derive(Debug)]
 pub struct OutputStreamer {
     // an stdout pipe steam
-    read_pipe: tokio::io::ReadHalf<tokio::io::DuplexStream>,
+    receiver: Arc<tokio::sync::Mutex<UnboundedReceiver<GrpcResponse>>>,
 }
 
 #[tonic::async_trait]
@@ -35,32 +39,18 @@ impl OutputStreaming for OutputStreamer {
         &self, // Make self mutable here
         request: Request<OutputChunk>,
     ) -> Result<Response<Self::StreamOutputStream>, Status> {
-        let (mut tx, rx) = mpsc::channel(4);
-        let pipe = &self.read_pipe;
+        let (mut tx, rx) = tokio_mpsc::channel(4);
+        let receiver_clone = Arc::clone(&self.receiver);
         tokio::spawn(async move {
-            let mut buf = String::new();
-            loop {
-                let n = pipe.read_to_string(&mut buf).await;
-                match n {
-                    Ok(n) => {
-                        if n == 0 {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        println!("Error reading from pipe: {}", e);
-                        break;
-                    }
-                };
-                tx.send(Ok(GrpcResponse {
-                    message: buf.clone(),
-                }))
-                .await
-                .unwrap();
-                buf.clear();
+            // use receiver_clone to send the recieved data to the client
+            let mut receiver = receiver_clone.lock().await;
+            while let Some(data) = receiver.recv().await {
+                tx.send(Ok(data)).await.unwrap();
             }
+            // release the lock
         });
 
+        println!("Client disconnected");
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
@@ -68,7 +58,7 @@ impl OutputStreaming for OutputStreamer {
 pub fn poll_events(
     running: Arc<AtomicBool>,
     engine_uid: i32,
-    stdout_write: &mut DuplexStream,
+    sender: UnboundedSender<GrpcResponse>,
 ) -> Result<(), AnyError> {
     let mut event_uids: Vec<i32> = Vec::new();
     let pg_conn = &mut establish_pg_connection();
@@ -87,14 +77,19 @@ pub fn poll_events(
 
         for event in events {
             println!("Event: {}", event);
-            stdout_write.write_all(event.trigger.as_bytes());
+            let _ = sender.send(GrpcResponse {
+                message: event.trigger.to_owned(),
+            });
             // async execute_event
             let _ = execute_event(event);
         }
 
         if event_uids.is_empty() {
+            event!(Level::INFO, "No events to process");
             println!("No events to process");
-            stdout_write.write_all(b"No events to process");
+            let _ = sender.send(GrpcResponse {
+                message: "No events to process".to_owned(),
+            });
             thread::sleep(Duration::from_millis(2000));
         }
 
@@ -107,19 +102,27 @@ pub fn poll_events(
             Ok(Some(signal_on)) => {
                 if signal_on {
                     println!("Received stop signal");
-                    stdout_write.write_all(b"Received stop signal");
+                    let _ = sender.send(GrpcResponse {
+                        message: "Received stop signal".to_owned(),
+                    });
                     break;
                 }
             }
             Ok(None) => {
                 println!("No stop signal");
-                stdout_write.write_all(b"No stop signal");
+                let _ = sender.send(GrpcResponse {
+                    message: "No stop signal".to_owned(),
+                });
             }
             Err(e) => {
                 eprintln!("Failed to query engine status {}", e);
                 eprintln!("exiting...");
-                stdout_write.write_all(format!("Failed to query engine status {}", e).as_bytes());
-                stdout_write.write_all(b"exiting...");
+                let _ = sender.send(GrpcResponse {
+                    message: format!("Failed to query engine status {}", e),
+                });
+                let _ = sender.send(GrpcResponse {
+                    message: "exiting...".to_owned(),
+                });
                 std::process::exit(1);
             }
         }
@@ -201,10 +204,10 @@ pub fn run_process<F>(
     process_name: &str,
     process_fn: F,
     engine_uid: i32,
-    stdout_pipe: &mut DuplexStream,
+    sender: UnboundedSender<GrpcResponse>,
 ) -> Result<(), AnyError>
 where
-    F: FnOnce(Arc<AtomicBool>, i32, &mut DuplexStream) -> Result<(), AnyError>,
+    F: FnOnce(Arc<AtomicBool>, i32, UnboundedSender<GrpcResponse>) -> Result<(), AnyError>,
 {
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
@@ -214,7 +217,7 @@ where
     })
     .expect("Error setting Ctrl-C handler");
 
-    if let Err(e) = process_fn(running, engine_uid, stdout_pipe) {
+    if let Err(e) = process_fn(running, engine_uid, sender) {
         eprintln!("Failed to start {} process: {}", process_name, e);
         eprintln!("exiting...");
         std::process::exit(1);
@@ -224,8 +227,11 @@ where
     Ok(())
 }
 
-pub fn run_event_process(engine_uid: i32, stdout_pipe: &mut DuplexStream) -> Result<(), AnyError> {
-    run_process("Event", poll_events, engine_uid, stdout_pipe)
+pub fn run_event_process(
+    engine_uid: i32,
+    sender: UnboundedSender<GrpcResponse>,
+) -> Result<(), AnyError> {
+    run_process("Event", poll_events, engine_uid, sender)
 }
 
 #[tokio::main]
@@ -236,16 +242,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine_uid = args[1].parse::<i32>().unwrap();
     println!("engine_uid: {}", engine_uid);
 
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::TRACE)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
+
     // let stdout_pipe: Arc<RwLock<Stdio>> = Arc::new(RwLock::new(Stdio::piped()));
-    // let stdout_pipe = Stdio::piped();
-    let (stdout_read, mut stdout_write) = tokio::io::duplex(1024);
+    // let (stdout_read, mut stdout_write) = tokio::io::duplex(1024);
 
     // let (read, write) = tokio::io::duplex(1024);
-    let (read_rx, _) = tokio::io::split(stdout_read);
+    // let (read_rx, _) = tokio::io::split(stdout_read);
     // let (mut write_rx, mut read_tx) = tokio::io::split(stdout_write);
 
+    let (sender, receiver) = tokio_mpsc::unbounded_channel::<GrpcResponse>();
+    let receiver: Arc<tokio::sync::Mutex<tokio_mpsc::UnboundedReceiver<GrpcResponse>>> =
+        Arc::new(tokio::sync::Mutex::new(receiver));
+
     tokio::spawn(async move {
-        if let Err(e) = run_event_process(engine_uid, &mut stdout_write) {
+        if let Err(e) = run_event_process(engine_uid, sender) {
             println!("Failed to start event process, {}", e);
             std::process::exit(1);
         };
@@ -253,7 +268,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let addr = "[::1]:10001".parse().unwrap();
 
-    let stream = OutputStreamer { read_pipe: read_rx };
+    let stream = OutputStreamer { receiver };
 
     let svc = OutputStreamingServer::new(stream);
 
