@@ -1,0 +1,14 @@
+syntax = "proto3";
+package grpc;
+
+service OutputStreaming {
+    rpc StreamOutput(OutputChunk) returns ( stream Response);
+}
+
+message OutputChunk {
+    string content = 1;
+}
+
+message Response {
+    string message = 1;
+}

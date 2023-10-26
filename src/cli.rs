@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Error as AnyError, Result};
+use anyhow::{anyhow, Error as AnyError, Ok, Result};
 use clap::{Parser, Subcommand};
 use diesel::{ExpressionMethods, PgConnection, QueryDsl, RunQueryDsl, SelectableHelper};
 use dotenv::dotenv;
@@ -9,8 +9,7 @@ use std::env;
 use std::fs::File;
 use std::process::Command;
 use tracing::field;
-use workflow::engine::{create_new_engine_entry, handle_stop, run_event_process};
-use workflow::engine::{run_task_process, update_engine_status};
+use workflow::engine_utils::{create_new_engine_entry, handle_stop, update_engine_status};
 use workflow::models::{Engine, EngineStatus, Event, Task};
 use workflow::parser::process_yaml_file;
 use workflow::utils::establish_pg_connection;
@@ -40,6 +39,10 @@ enum Commands {
     },
     StartEventProcess {
         engine_uid: i32,
+    },
+    Logs {
+        #[clap(subcommand)]
+        subcommand: LogsSubcommands,
     },
     Stop {},
     /// Adds workflow to the queue
@@ -96,6 +99,16 @@ enum ShowSubcommands {
     Engine { uid: i32 },
 }
 
+#[derive(Subcommand)]
+enum LogsSubcommands {
+    // Lists all tasks
+    Task { uid: i32 },
+    // Lists all events
+    Event { uid: i32 },
+    // Lists all engines
+    // Engine { uid: i32 },
+}
+
 #[derive(PartialEq)]
 enum ProcessType {
     Task,
@@ -109,7 +122,7 @@ fn create_and_clear_log_file(file_path: &str) -> Result<File, AnyError> {
 }
 
 fn start_process(
-    subcommand_name: &str,
+    binary_name: &str,
     process_type: ProcessType,
     engine_uid: i32,
 ) -> Result<(), AnyError> {
@@ -141,8 +154,8 @@ fn start_process(
     }
 
     let command = binding
-        .arg(subcommand_name)
-        .arg("--")
+        .arg("--bin")
+        .arg(binary_name)
         .arg(engine_uid.to_string())
         .stdout(stdout)
         .stderr(stderr);
@@ -151,7 +164,7 @@ fn start_process(
     Ok(())
 }
 
-pub fn cli() {
+pub async fn cli() {
     let cli = Cli::parse();
 
     match &cli.command {
@@ -174,15 +187,22 @@ pub fn cli() {
         }
         Commands::StartEventProcess { engine_uid } => {
             println!("StartEventProcess");
-            if let Err(e) = run_event_process(*engine_uid) {
-                println!("Failed to start event process, {}", e);
-                std::process::exit(1);
-            };
+            // if let Err(e) = run_event_process(*engine_uid) {
+            //     println!("Failed to start event process, {}", e);
+            //     std::process::exit(1);
+            // };
         }
         Commands::StartTaskProcess { engine_uid } => {
             println!("StartTaskProcess");
-            if let Err(e) = run_task_process(*engine_uid) {
-                println!("Failed to start task process, {}", e);
+            // if let Err(e) = run_task_process(*engine_uid) {
+            //     println!("Failed to start task process, {}", e);
+            //     std::process::exit(1);
+            // };
+        }
+        Commands::Logs { subcommand } => {
+            println!("Logs");
+            if let Err(e) = process_log_command(subcommand).await {
+                println!("Failed to stop the engine, {}", e);
                 std::process::exit(1);
             };
         }
@@ -229,6 +249,36 @@ pub fn cli() {
     std::process::exit(0);
 }
 
+async fn process_log_command(subcommand: &LogsSubcommands) -> Result<(), AnyError> {
+    match subcommand {
+        LogsSubcommands::Task { uid } => show_log(uid.to_string()).await?,
+        LogsSubcommands::Event { uid } => show_log(uid.to_string()).await?,
+    };
+    Ok(())
+}
+pub mod grpc {
+    tonic::include_proto!("grpc");
+}
+use grpc::output_streaming_client::OutputStreamingClient;
+use grpc::{OutputChunk, Response as GrpcResponse};
+
+use std::error::Error;
+use tonic::transport::Channel;
+
+async fn show_log(server_id: String) -> Result<(), AnyError> {
+    let mut client = OutputStreamingClient::connect("http://[::1]:10000").await?;
+
+    let mut stream = client
+        .stream_output(OutputChunk::default())
+        .await?
+        .into_inner();
+
+    while let Some(log_message) = stream.message().await? {
+        println!("NOTE = {:?}", log_message);
+    }
+    Ok(())
+}
+
 fn get_system_ip_address() -> Result<String, AnyError> {
     // Get a vector with all network interfaces found
     let all_interfaces = interfaces();
@@ -262,13 +312,13 @@ fn process_start_command() -> Result<(), AnyError> {
     )?;
     println!("created new engine entry with uid: {}", engine_uid);
 
-    if let Err(e) = start_process("start-event-process", ProcessType::Event, engine_uid) {
+    if let Err(e) = start_process("event", ProcessType::Event, engine_uid) {
         eprintln!("Failed to start Event process: {}", e);
         eprintln!("exiting...");
         std::process::exit(1);
     }
 
-    if let Err(e) = start_process("start-task-process", ProcessType::Task, engine_uid) {
+    if let Err(e) = start_process("task", ProcessType::Task, engine_uid) {
         eprintln!("Failed to start Task process: {}", e);
         eprintln!("exiting...");
         std::process::exit(1);
@@ -413,6 +463,13 @@ fn list_items<T: serde::ser::Serialize>(items: Vec<T>) -> Result<(), AnyError> {
     }
 
     pretty_table.printstd();
+    Ok(())
+}
+
+#[tokio::main]
+
+async fn main() -> Result<(), AnyError> {
+    cli().await;
     Ok(())
 }
 

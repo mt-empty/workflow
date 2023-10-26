@@ -1,6 +1,3 @@
-use crate::models::{EventStatus, LightEvent, LightTask, ProcessStatus};
-use crate::schema;
-use crate::utils::{establish_pg_connection, push_tasks_to_queue};
 use anyhow::Error as AnyError;
 use diesel::prelude::*;
 use std::path::Path;
@@ -8,13 +5,57 @@ use std::process::Command as ShellCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use std::{str, thread};
+use std::{env, str, thread};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::mpsc;
+use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tonic::transport::Server;
+use tonic::{Request, Response, Status, Streaming};
+use workflow::engine_utils::run_process;
+use workflow::models::{EventStatus, LightEvent, LightTask, ProcessStatus};
+use workflow::schema;
+use workflow::utils::{establish_pg_connection, push_tasks_to_queue};
+
+pub mod grpc {
+    tonic::include_proto!("grpc");
+}
+use grpc::output_streaming_server::{OutputStreaming, OutputStreamingServer};
+use grpc::{OutputChunk, Response as GrpcResponse};
+
+#[derive(Debug)]
+pub struct OutputStreamer {
+    // an stdout pipe steam
+    features: Arc<Vec<GrpcResponse>>,
+}
+
+#[tonic::async_trait]
+impl OutputStreaming for OutputStreamer {
+    type StreamOutputStream = ReceiverStream<Result<GrpcResponse, Status>>;
+
+    async fn stream_output(
+        &self,
+        request: Request<OutputChunk>,
+    ) -> Result<Response<Self::StreamOutputStream>, Status> {
+        let (mut tx, rx) = mpsc::channel(4);
+        let features = self.features.clone();
+
+        // Spawn an async task to send the output data to the client
+
+        tokio::spawn(async move {
+            for feature in &features[..] {
+                tx.send(Ok(feature.clone())).await.unwrap();
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+}
 
 pub fn poll_events(running: Arc<AtomicBool>, engine_uid: i32) -> Result<(), AnyError> {
     let mut event_uids: Vec<i32> = Vec::new();
     let pg_conn = &mut establish_pg_connection();
 
-    use crate::schema::engines::dsl::*;
+    use workflow::schema::engines::dsl::*;
 
     diesel::update(engines)
         .filter(uid.eq(engine_uid))
@@ -91,14 +132,14 @@ fn execute_event(event: LightEvent) -> Result<(), AnyError> {
         .expect("failed to execute process");
 
     // if shell command return 0, then the event was triggered successfully
-    use crate::schema::events::dsl::*;
+    use workflow::schema::events::dsl::*;
     if output.status.code().unwrap() == 0 {
         diesel::update(events.find(event.uid))
             .set(status.eq(EventStatus::Succeeded.to_string()))
             .execute(conn)?;
 
         {
-            use crate::schema::tasks::dsl::*;
+            use workflow::schema::tasks::dsl::*;
             let light_tasks: Vec<LightTask> = tasks
                 .select(LightTask::as_select())
                 .filter(event_uid.eq(event.uid))
@@ -130,5 +171,39 @@ fn execute_event(event: LightEvent) -> Result<(), AnyError> {
     println!("----------------------------------------------");
     println!("stderr: {}", str::from_utf8(&output.stderr)?);
     println!("##############################################");
+    Ok(())
+}
+
+pub fn run_event_process(engine_uid: i32) -> Result<(), AnyError> {
+    run_process("Event", poll_events, engine_uid)
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().collect();
+    println!("args: {:?}", args);
+
+    let engine_uid = args[1].parse::<i32>().unwrap();
+    println!("engine_uid: {}", engine_uid);
+
+    tokio::spawn(async move {
+        if let Err(e) = run_event_process(engine_uid) {
+            println!("Failed to start event process, {}", e);
+            std::process::exit(1);
+        };
+    });
+
+    let addr = "[::1]:10001".parse().unwrap();
+
+    let stream = OutputStreamer {
+        features: Arc::new(vec![GrpcResponse {
+            message: "Hello from event".into(),
+        }]),
+    };
+
+    let svc = OutputStreamingServer::new(stream);
+
+    Server::builder().add_service(svc).serve(addr).await?;
+
     Ok(())
 }
