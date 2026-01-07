@@ -1,6 +1,6 @@
 # Workflow
 
-A simple readability oriented event driven workflow engine.
+A simple readability oriented polling-based workflow engine with conditional triggers.
 ## Demo
 ![](./demo.gif)
 
