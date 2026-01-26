@@ -1,0 +1,16 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "./Cargo.toml",
+    ],
+    "rust-analyzer.cargo.buildScripts.enable": true,
+    "sqltools.format": {
+        "language": "sql",
+        "uppercaseKeywords": true,
+        "linesBetweenQueries": 2,
+        "keywordCase": "upper",
+        "identifierCase": "unchanged",
+    },
+    "sqltools.formatLanguages": [
+        "sql"
+    ],
+}

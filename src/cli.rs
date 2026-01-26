@@ -1,3 +1,5 @@
+//!
+
 use anyhow::{anyhow, Error as AnyError, Ok, Result};
 use clap::{Parser, Subcommand};
 use diesel::{ExpressionMethods, PgConnection, QueryDsl, RunQueryDsl, SelectableHelper};
@@ -314,11 +316,11 @@ fn process_start_command() -> Result<(), AnyError> {
     )?;
     println!("created new engine entry with uid: {}", engine_uid);
 
-    if let Err(e) = start_process("event", ProcessType::Event, engine_uid) {
-        eprintln!("Failed to start Event process: {}", e);
-        eprintln!("exiting...");
-        std::process::exit(1);
-    }
+    // if let Err(e) = start_process("event", ProcessType::Event, engine_uid) {
+    //     eprintln!("Failed to start Event process: {}", e);
+    //     eprintln!("exiting...");
+    //     std::process::exit(1);
+    // }
 
     if let Err(e) = start_process("task", ProcessType::Task, engine_uid) {
         eprintln!("Failed to start Task process: {}", e);

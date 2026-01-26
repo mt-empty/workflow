@@ -45,6 +45,21 @@ tokio = { version = "1.32", features = ["rt-multi-thread", "macros", "sync", "ti
 rand = "0.8.5"
 async-stream = "0.3.5"
 tokio-stream = "0.1.14"
+crossbeam = "0.8.2"
+crossbeam-channel = "0.5.8"
+crossbeam-utils = "0.8.16"
+bus = "2.4.1"
 
 [build-dependencies]
 tonic-build = "0.9.0"
+
+# [unstable]
+# profile-rustflags = true
+
+# [profile.dev]
+# # Enable the missing_docs warning for development builds
+# rustflags = ["-C", "warn=missing_docs"]
+
+# [profile.release]
+# # Enable the missing_docs warning for release builds
+# rustflags = ["-C", "warn=missing_docs"]

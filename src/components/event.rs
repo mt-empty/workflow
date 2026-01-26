@@ -5,13 +5,15 @@ use std::path::Path;
 use std::process::{Command as ShellCommand, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, RwLock};
 use std::time::Duration;
 use std::{env, str, thread};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, DuplexStream};
 // use tokio::net::unix::pipe::Sender;
+use bus::{Bus, BusReader};
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::Mutex;
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tonic::transport::Server;
 use tonic::{Request, Response, Status, Streaming};
@@ -29,7 +31,7 @@ use grpc::{OutputChunk, Response as GrpcResponse};
 #[derive(Debug)]
 pub struct OutputStreamer {
     // an stdout pipe steam
-    receiver: Arc<tokio::sync::Mutex<UnboundedReceiver<GrpcResponse>>>,
+    receiver: Arc<Mutex<Bus<GrpcResponse>>>,
 }
 
 #[tonic::async_trait]
@@ -40,14 +42,15 @@ impl OutputStreaming for OutputStreamer {
         request: Request<OutputChunk>,
     ) -> Result<Response<Self::StreamOutputStream>, Status> {
         let (mut tx, rx) = tokio_mpsc::channel(4);
-        let receiver_clone = Arc::clone(&self.receiver);
+        let mut bus_mutex = self.receiver.clone();
+        let mut bus = bus_mutex.lock().await;
+        let mut bus_rx = bus.add_rx();
+
         tokio::spawn(async move {
-            // use receiver_clone to send the recieved data to the client
-            let mut receiver = receiver_clone.lock().await;
-            while let Some(data) = receiver.recv().await {
-                tx.send(Ok(data)).await.unwrap();
+            // while I recieve messages on the bus, send them to the client
+            for message in bus_rx.iter() {
+                tx.send(Ok(message)).await.unwrap();
             }
-            // release the lock
         });
 
         println!("Client disconnected");
@@ -55,10 +58,20 @@ impl OutputStreaming for OutputStreamer {
     }
 }
 
-pub fn poll_events(
+// if async is used here, then there is no guarantee that the event will be executed in order
+async fn broadcast_message(
+    bus_mutex: Arc<Mutex<Bus<GrpcResponse>>>,
+    message: String,
+) -> Result<(), AnyError> {
+    let mut bus = bus_mutex.lock().await;
+    let _ = bus.broadcast(GrpcResponse { message });
+    Ok(())
+}
+
+async fn poll_events(
     running: Arc<AtomicBool>,
     engine_uid: i32,
-    sender: UnboundedSender<GrpcResponse>,
+    bus_mutex: Arc<Mutex<Bus<GrpcResponse>>>,
 ) -> Result<(), AnyError> {
     let mut event_uids: Vec<i32> = Vec::new();
     let pg_conn = &mut establish_pg_connection();
@@ -77,9 +90,8 @@ pub fn poll_events(
 
         for event in events {
             println!("Event: {}", event);
-            let _ = sender.send(GrpcResponse {
-                message: event.trigger.to_owned(),
-            });
+            let future = broadcast_message(bus_mutex.clone(), event.trigger.to_owned());
+            let _ = future.await;
             // async execute_event
             let _ = execute_event(event);
         }
@@ -87,9 +99,7 @@ pub fn poll_events(
         if event_uids.is_empty() {
             event!(Level::INFO, "No events to process");
             println!("No events to process");
-            let _ = sender.send(GrpcResponse {
-                message: "No events to process".to_owned(),
-            });
+            broadcast_message(bus_mutex.clone(), "No events to process".to_owned()).await;
             thread::sleep(Duration::from_millis(2000));
         }
 
@@ -102,27 +112,22 @@ pub fn poll_events(
             Ok(Some(signal_on)) => {
                 if signal_on {
                     println!("Received stop signal");
-                    let _ = sender.send(GrpcResponse {
-                        message: "Received stop signal".to_owned(),
-                    });
+                    broadcast_message(bus_mutex.clone(), "Received stop signal".to_owned()).await;
                     break;
                 }
             }
             Ok(None) => {
                 println!("No stop signal");
-                let _ = sender.send(GrpcResponse {
-                    message: "No stop signal".to_owned(),
-                });
+                broadcast_message(bus_mutex.clone(), "No stop signal".to_owned()).await;
             }
             Err(e) => {
                 eprintln!("Failed to query engine status {}", e);
                 eprintln!("exiting...");
-                let _ = sender.send(GrpcResponse {
-                    message: format!("Failed to query engine status {}", e),
-                });
-                let _ = sender.send(GrpcResponse {
-                    message: "exiting...".to_owned(),
-                });
+                broadcast_message(
+                    bus_mutex.clone(),
+                    format!("Failed to query engine status {}\nExisting ...", e),
+                )
+                .await;
                 std::process::exit(1);
             }
         }
@@ -204,10 +209,10 @@ pub fn run_process<F>(
     process_name: &str,
     process_fn: F,
     engine_uid: i32,
-    sender: UnboundedSender<GrpcResponse>,
+    bus: Arc<Mutex<Bus<GrpcResponse>>>,
 ) -> Result<(), AnyError>
 where
-    F: FnOnce(Arc<AtomicBool>, i32, UnboundedSender<GrpcResponse>) -> Result<(), AnyError>,
+    F: FnOnce(Arc<AtomicBool>, i32, Arc<Mutex<Bus<GrpcResponse>>>) -> Result<(), AnyError>,
 {
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
@@ -217,7 +222,7 @@ where
     })
     .expect("Error setting Ctrl-C handler");
 
-    if let Err(e) = process_fn(running, engine_uid, sender) {
+    if let Err(e) = process_fn(running, engine_uid, bus) {
         eprintln!("Failed to start {} process: {}", process_name, e);
         eprintln!("exiting...");
         std::process::exit(1);
@@ -229,9 +234,9 @@ where
 
 pub fn run_event_process(
     engine_uid: i32,
-    sender: UnboundedSender<GrpcResponse>,
+    bus: Arc<Mutex<Bus<GrpcResponse>>>,
 ) -> Result<(), AnyError> {
-    run_process("Event", poll_events, engine_uid, sender)
+    run_process("Event", poll_events, engine_uid, bus)
 }
 
 #[tokio::main]
@@ -259,8 +264,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let receiver: Arc<tokio::sync::Mutex<tokio_mpsc::UnboundedReceiver<GrpcResponse>>> =
         Arc::new(tokio::sync::Mutex::new(receiver));
 
+    let mut bus = Bus::<GrpcResponse>::new(100);
+    let mut bus_mutex = Arc::new(tokio::sync::Mutex::new(bus));
+    let bus_mutex_grpc = bus_mutex.clone();
+    // let mut rx1 = bus.add_rx();
+
     tokio::spawn(async move {
-        if let Err(e) = run_event_process(engine_uid, sender) {
+        if let Err(e) = run_event_process(engine_uid, bus_mutex) {
             println!("Failed to start event process, {}", e);
             std::process::exit(1);
         };
@@ -268,7 +278,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let addr = "[::1]:10001".parse().unwrap();
 
-    let stream = OutputStreamer { receiver };
+    let stream = OutputStreamer {
+        receiver: bus_mutex_grpc,
+    };
 
     let svc = OutputStreamingServer::new(stream);
 
