@@ -1,86 +1,81 @@
-use crate::models::EngineStatus;
-use crate::utils::establish_pg_connection;
-use crate::{models, schema};
 use anyhow::Error as AnyError;
-use ctrlc::set_handler;
-use diesel::PgConnection;
-use std::str;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::env;
+use workflow::components::event::poll_events;
+use workflow::components::task::queue_processor;
+use workflow::engine_utils::run_process;
+// mod models;
+// mod utils;
 
 use diesel::prelude::*;
 
-use self::event::poll_events;
-use self::task::queue_processor;
+// I want to use the poll_events function from src/event.rs
 
-mod event;
-mod task;
+use tonic::{transport::Server, Request, Response, Status};
 
-fn run_process<F>(process_name: &str, process_fn: F, engine_uid: i32) -> Result<(), AnyError>
-where
-    F: FnOnce(Arc<AtomicBool>, i32) -> Result<(), AnyError>,
-{
-    let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
+use grpc::greeter_server::{Greeter, GreeterServer};
+use grpc::{LogMessageRequest, LogMessageResponse};
 
-    set_handler(move || {
-        r.store(false, Ordering::SeqCst);
-    })
-    .expect("Error setting Ctrl-C handler");
+pub mod grpc {
+    tonic::include_proto!("grpc");
+}
 
-    if let Err(e) = process_fn(running, engine_uid) {
-        eprintln!("Failed to start {} process: {}", process_name, e);
-        eprintln!("exiting...");
-        std::process::exit(1);
+// pub fn run_task_process(engine_uid: i32) -> Result<(), AnyError> {
+//     run_process("Task", queue_processor, engine_uid)
+// }
+
+// pub fn run_event_process(engine_uid: i32) -> Result<(), AnyError> {
+//     run_process("Event", poll_events, engine_uid)
+// }
+
+#[derive(Debug, Default)]
+pub struct MyGreeter {}
+
+#[tonic::async_trait]
+impl Greeter for MyGreeter {
+    async fn say_hello(
+        &self,
+        request: Request<LogMessageRequest>,
+    ) -> Result<Response<LogMessageResponse>, Status> {
+        println!("Got a request: {:?}", request);
+
+        let reply = grpc::LogMessageResponse {
+            message: format!("Hello {}!", request.into_inner().content).into(),
+        };
+
+        Ok(Response::new(reply))
     }
-    println!("{} process stopped correctly", process_name);
+}
+
+//main function that takes an argument
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().collect();
+    println!("args: {:?}", args);
+
+    let engine_uid = args[1].parse::<i32>().unwrap();
+    println!("engine_uid: {}", engine_uid);
+
+    // tokio::spawn(async move {
+    //     if let Err(e) = run_event_process(engine_uid) {
+    //         println!("Failed to start event process, {}", e);
+    //         std::process::exit(1);
+    //     };
+    // });
+
+    // tokio::spawn(async move {
+    //     if let Err(e) = run_task_process(engine_uid) {
+    //         println!("Failed to start event process, {}", e);
+    //         std::process::exit(1);
+    //     };
+    // });
+
+    let addr = "[::1]:50051".parse()?;
+    let greeter = MyGreeter::default();
+
+    Server::builder()
+        .add_service(GreeterServer::new(greeter))
+        .serve(addr)
+        .await?;
 
     Ok(())
-}
-
-pub fn run_task_process(engine_uid: i32) -> Result<(), AnyError> {
-    run_process("Task", queue_processor, engine_uid)
-}
-
-pub fn run_event_process(engine_uid: i32) -> Result<(), AnyError> {
-    run_process("Event", poll_events, engine_uid)
-}
-
-pub fn handle_stop() -> Result<(), AnyError> {
-    diesel::update(schema::engines::table)
-        .set(schema::engines::stop_signal.eq(true))
-        .execute(&mut establish_pg_connection())?;
-    Ok(())
-}
-
-pub fn update_engine_status(
-    conn: &mut PgConnection,
-    engine_uid: i32,
-    engine_status: EngineStatus,
-) -> Result<(), diesel::result::Error> {
-    use crate::schema::engines::dsl::*;
-
-    diesel::update(engines)
-        .filter(uid.eq(engine_uid))
-        .set(status.eq(engine_status.to_string()))
-        .execute(conn)?;
-
-    Ok(())
-}
-
-pub fn create_new_engine_entry(
-    conn: &mut PgConnection,
-    name: &str,
-    ip_address: &str,
-) -> Result<i32, diesel::result::Error> {
-    use crate::schema::engines::table as engines;
-    use crate::schema::engines::uid as engine_uid;
-
-    let new_engine = models::NewEngine { name, ip_address };
-
-    //insert and return uid
-    diesel::insert_into(engines)
-        .values(&new_engine)
-        .returning(engine_uid)
-        .get_result::<i32>(conn)
 }

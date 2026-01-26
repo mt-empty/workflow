@@ -1,0 +1,28 @@
+
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Ensure the Docker image is available
+      docker_image:
+        name: your_docker_image_name
+        source: pull
+
+    - name: Create Docker containers
+      docker_container:
+        name: "{{ item }}"
+        image: your_docker_image_name
+        state: started
+      with_items:
+        - container1
+        - container2
+
+- hosts: container_hosts
+  gather_facts: false
+  tasks:
+    - name: Copy binary file to Docker containers
+      copy:
+        src: /path/to/your/binary_file
+        dest: /path/where/you/want/to/copy/binary_file
+        mode: '0755'
+      become: true
+      remote_user: your_ssh_username

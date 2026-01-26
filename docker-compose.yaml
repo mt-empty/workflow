@@ -76,6 +76,8 @@ services:
     networks:
       - postgres_ntw
       - engine3_ntw
+    volumes:
+      - workflow_files:/app/workflow_files
 
 networks:
   postgres_ntw:
@@ -86,3 +88,11 @@ networks:
     driver: bridge
   engine3_ntw:
     driver: bridge
+
+volumes:
+  workflow_files:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./workflow_files

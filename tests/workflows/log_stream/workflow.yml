@@ -1,0 +1,7 @@
+name: simulation of log stream
+description: simulation of log stream
+events:
+  - name: Event2
+    trigger: ./ping.sh
+    tasks:
+      - path: ./tasks/stream.sh
