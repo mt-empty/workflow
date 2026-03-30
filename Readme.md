@@ -106,7 +106,7 @@ docker exec -it workflow-redis redis-cli
 LRANGE tasks 0 -1
 ```
 
-## TODO
+<!-- -## TODO
 - [x] Create a test suite
 - [x] Add support for tasks
 - [x] Add support for event triggers
@@ -121,10 +121,7 @@ LRANGE tasks 0 -1
     <!-- - [ ] Create a network attached storage for sharing workflow files -->
     - [ ] Implement gRPC to stream output of task and event processes
     - [ ] Implement round robin algorithm for distributing workflows to engines 
-  - [ ] Automate container deployment using
-    - [ ] Kubernetes
-    <!-- - [ ] Ansible -->
-<!-- - [ ] LLM integration -->
+    - [ ] LLM integration -->
 
 ---
 
