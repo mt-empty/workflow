@@ -118,7 +118,7 @@ LRANGE tasks 0 -1
 - [ ] Make it distributed
   - [ ] Add support for multiple engines
     - [x] Add a testing environment with multiple engines using docker compose
-    <!-- - [ ] Create a network attached storage for sharing workflow files -->
+    - [ ] Create a network attached storage for sharing workflow files
     - [ ] Implement gRPC to stream output of task and event processes
     - [ ] Implement round robin algorithm for distributing workflows to engines 
     - [ ] LLM integration -->
